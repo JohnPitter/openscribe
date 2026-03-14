@@ -161,11 +161,11 @@ func (wb *Workbook) buildWorkbookXML() ([]byte, error) {
 // XML types for worksheets
 
 type xmlWorksheet struct {
-	XMLName               xml.Name                    `xml:"worksheet"`
-	Xmlns                 string                      `xml:"xmlns,attr"`
-	SheetData             xmlSheetData                `xml:"sheetData"`
-	MergeCells            *xmlMergeCells              `xml:"mergeCells,omitempty"`
-	ConditionalFormatting []xmlConditionalFormatting   `xml:"conditionalFormatting,omitempty"`
+	XMLName               xml.Name                   `xml:"worksheet"`
+	Xmlns                 string                     `xml:"xmlns,attr"`
+	SheetData             xmlSheetData               `xml:"sheetData"`
+	MergeCells            *xmlMergeCells             `xml:"mergeCells,omitempty"`
+	ConditionalFormatting []xmlConditionalFormatting `xml:"conditionalFormatting,omitempty"`
 }
 
 type xmlSheetData struct {
@@ -185,8 +185,8 @@ type xmlCell struct {
 }
 
 type xmlMergeCells struct {
-	Count     string          `xml:"count,attr"`
-	MergeCell []xmlMergeCell  `xml:"mergeCell"`
+	Count     string         `xml:"count,attr"`
+	MergeCell []xmlMergeCell `xml:"mergeCell"`
 }
 
 type xmlMergeCell struct {
@@ -201,11 +201,11 @@ type xmlConditionalFormatting struct {
 }
 
 type xmlCFRule struct {
-	Type       string      `xml:"type,attr"`
-	Operator   string      `xml:"operator,attr,omitempty"`
-	Priority   string      `xml:"priority,attr"`
-	Formula    []string    `xml:"formula,omitempty"`
-	DXF        *xmlCFDXF   `xml:"dxf,omitempty"`
+	Type       string           `xml:"type,attr"`
+	Operator   string           `xml:"operator,attr,omitempty"`
+	Priority   string           `xml:"priority,attr"`
+	Formula    []string         `xml:"formula,omitempty"`
+	DXF        *xmlCFDXF        `xml:"dxf,omitempty"`
 	ColorScale *xmlCFColorScale `xml:"colorScale,omitempty"`
 	DataBar    *xmlCFDataBar    `xml:"dataBar,omitempty"`
 }
@@ -238,7 +238,7 @@ type xmlCFPatternFill struct {
 }
 
 type xmlCFColorScale struct {
-	CFVOs  []xmlCFVO   `xml:"cfvo"`
+	CFVOs  []xmlCFVO    `xml:"cfvo"`
 	Colors []xmlCFColor `xml:"color"`
 }
 

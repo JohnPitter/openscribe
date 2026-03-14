@@ -17,4 +17,7 @@ func (img *SlideImage) elementType() string { return "image" }
 func (img *SlideImage) SetPosition(x, y common.Measurement) { img.x = x; img.y = y }
 
 // SetSize sets the image size
-func (img *SlideImage) SetSize(width, height common.Measurement) { img.width = width; img.height = height }
+func (img *SlideImage) SetSize(width, height common.Measurement) {
+	img.width = width
+	img.height = height
+}

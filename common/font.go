@@ -26,7 +26,7 @@ const (
 type TextDecoration int
 
 const (
-	TextDecorationNone          TextDecoration = iota
+	TextDecorationNone TextDecoration = iota
 	TextDecorationUnderline
 	TextDecorationStrikethrough
 	TextDecorationDouble
@@ -71,7 +71,7 @@ func NewFont(family string, size float64) Font {
 	}
 }
 
-func (f Font) WithWeight(w FontWeight) Font        { f.Weight = w; return f }
+func (f Font) WithWeight(w FontWeight) Font         { f.Weight = w; return f }
 func (f Font) WithStyle(s FontStyle) Font           { f.Style = s; return f }
 func (f Font) WithColor(c Color) Font               { f.Color = c; return f }
 func (f Font) WithSize(s float64) Font              { f.Size = s; return f }

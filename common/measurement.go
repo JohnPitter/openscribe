@@ -17,12 +17,12 @@ type Measurement struct {
 	points float64
 }
 
-func Pt(v float64) Measurement  { return Measurement{points: v} }
-func In(v float64) Measurement  { return Measurement{points: v * 72} }
-func Cm(v float64) Measurement  { return Measurement{points: v * 28.3465} }
-func Mm(v float64) Measurement  { return Measurement{points: v * 2.83465} }
-func Px(v float64) Measurement  { return Measurement{points: v * 0.75} }
-func EMU(v int64) Measurement   { return Measurement{points: float64(v) / 12700} }
+func Pt(v float64) Measurement { return Measurement{points: v} }
+func In(v float64) Measurement { return Measurement{points: v * 72} }
+func Cm(v float64) Measurement { return Measurement{points: v * 28.3465} }
+func Mm(v float64) Measurement { return Measurement{points: v * 2.83465} }
+func Px(v float64) Measurement { return Measurement{points: v * 0.75} }
+func EMU(v int64) Measurement  { return Measurement{points: float64(v) / 12700} }
 
 func (m Measurement) Points() float64      { return m.points }
 func (m Measurement) Inches() float64      { return m.points / 72 }

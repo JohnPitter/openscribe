@@ -132,8 +132,8 @@ func (p *Presentation) buildPresentationXML() ([]byte, error) {
 }
 
 type xmlTransition struct {
-	XMLName  xml.Name  `xml:"p:transition"`
-	Speed    string    `xml:"spd,attr,omitempty"`
+	XMLName  xml.Name   `xml:"p:transition"`
+	Speed    string     `xml:"spd,attr,omitempty"`
 	Fade     *xmlEmpty2 `xml:"p:fade,omitempty"`
 	Push     *xmlEmpty2 `xml:"p:push,omitempty"`
 	Wipe     *xmlEmpty2 `xml:"p:wipe,omitempty"`
@@ -233,7 +233,7 @@ type xmlNvSpPr struct {
 }
 
 type xmlSpPr struct {
-	Xfrm      *xmlXfrm     `xml:"a:xfrm,omitempty"`
+	Xfrm      *xmlXfrm      `xml:"a:xfrm,omitempty"`
 	PrstGeom  *xmlPrstGeom  `xml:"a:prstGeom,omitempty"`
 	SolidFill *xmlSolidFill `xml:"a:solidFill,omitempty"`
 }
@@ -277,10 +277,10 @@ type xmlARun struct {
 }
 
 type xmlARPr struct {
-	Lang      string       `xml:"lang,attr,omitempty"`
-	Sz        string       `xml:"sz,attr,omitempty"`
-	B         string       `xml:"b,attr,omitempty"`
-	I         string       `xml:"i,attr,omitempty"`
+	Lang      string        `xml:"lang,attr,omitempty"`
+	Sz        string        `xml:"sz,attr,omitempty"`
+	B         string        `xml:"b,attr,omitempty"`
+	I         string        `xml:"i,attr,omitempty"`
 	SolidFill *xmlSolidFill `xml:"a:solidFill,omitempty"`
 }
 

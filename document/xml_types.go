@@ -10,10 +10,10 @@ const (
 
 // xmlDocument is the root w:document element
 type xmlDocument struct {
-	XMLName xml.Name         `xml:"w:document"`
-	W       string           `xml:"xmlns:w,attr"`
-	R       string           `xml:"xmlns:r,attr"`
-	Body    xmlBody          `xml:"w:body"`
+	XMLName xml.Name `xml:"w:document"`
+	W       string   `xml:"xmlns:w,attr"`
+	R       string   `xml:"xmlns:r,attr"`
+	Body    xmlBody  `xml:"w:body"`
 }
 
 type xmlBody struct {
@@ -132,8 +132,8 @@ type xmlShading struct {
 type xmlSectionProps struct {
 	HeaderRef *xmlHeaderFooterRef `xml:"w:headerReference,omitempty"`
 	FooterRef *xmlHeaderFooterRef `xml:"w:footerReference,omitempty"`
-	PgSz      *xmlPageSize       `xml:"w:pgSz,omitempty"`
-	PgMar     *xmlPageMargins    `xml:"w:pgMar,omitempty"`
+	PgSz      *xmlPageSize        `xml:"w:pgSz,omitempty"`
+	PgMar     *xmlPageMargins     `xml:"w:pgMar,omitempty"`
 }
 
 type xmlHeaderFooterRef struct {

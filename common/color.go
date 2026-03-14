@@ -5,7 +5,7 @@ import "fmt"
 // Color represents an RGB color
 type Color struct {
 	R, G, B uint8
-	A        uint8 // Alpha (0-255, 255 = opaque)
+	A       uint8 // Alpha (0-255, 255 = opaque)
 }
 
 func NewColor(r, g, b uint8) Color {

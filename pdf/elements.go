@@ -26,8 +26,8 @@ func (t *TextElement) SetFont(f common.Font) { t.font = f }
 // LineElement represents a line
 type LineElement struct {
 	x1, y1, x2, y2 float64
-	color           common.Color
-	width           float64
+	color          common.Color
+	width          float64
 }
 
 func (l *LineElement) pdfElement() {}

@@ -8,13 +8,13 @@ import (
 
 // Sheet represents a worksheet
 type Sheet struct {
-	workbook    *Workbook
-	name        string
-	index       int
-	rows        map[int]*Row
-	colWidths   map[int]float64
-	columns     map[int]*Column
-	mergedCells []MergedCell
+	workbook           *Workbook
+	name               string
+	index              int
+	rows               map[int]*Row
+	colWidths          map[int]float64
+	columns            map[int]*Column
+	mergedCells        []MergedCell
 	charts             []*Chart
 	conditionalFormats []*ConditionalFormat
 	maxRow             int

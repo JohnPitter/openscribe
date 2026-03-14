@@ -38,7 +38,7 @@ func (c *SlideChart) elementType() string { return "chart" }
 func (s *Slide) AddChart(chartType ChartType, x, y, width, height common.Measurement) *SlideChart {
 	c := &SlideChart{
 		chartType: chartType,
-		x: x, y: y, width: width, height: height,
+		x:         x, y: y, width: width, height: height,
 	}
 	s.elements = append(s.elements, c)
 	return c

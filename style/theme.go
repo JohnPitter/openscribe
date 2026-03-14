@@ -8,9 +8,9 @@ type DesignLevel int
 
 const (
 	DesignLevelBasic        DesignLevel = iota // Clean, minimal
-	DesignLevelProfessional                     // Business-grade
-	DesignLevelPremium                          // High-quality (Behance/Freepik)
-	DesignLevelLuxury                           // Ultra-premium (Slidesgo/Agency)
+	DesignLevelProfessional                    // Business-grade
+	DesignLevelPremium                         // High-quality (Behance/Freepik)
+	DesignLevelLuxury                          // Ultra-premium (Slidesgo/Agency)
 )
 
 func (d DesignLevel) String() string {

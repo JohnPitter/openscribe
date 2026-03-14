@@ -640,9 +640,9 @@ func buildPieChart(content *bytes.Buffer, c *ChartElement, plotX, plotY, plotW, 
 		common.Purple,
 		common.Yellow,
 		{R: 0, G: 191, B: 255, A: 255},   // deep sky blue
-		{R: 255, G: 105, B: 180, A: 255},  // hot pink
-		{R: 34, G: 139, B: 34, A: 255},    // forest green
-		{R: 255, G: 215, B: 0, A: 255},    // gold
+		{R: 255, G: 105, B: 180, A: 255}, // hot pink
+		{R: 34, G: 139, B: 34, A: 255},   // forest green
+		{R: 255, G: 215, B: 0, A: 255},   // gold
 	}
 
 	// Center and radius

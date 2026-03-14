@@ -20,7 +20,7 @@ func TestDesignLevelDocx(t *testing.T) {
 
 			// Rich document structure
 			doc.AddHeading("Report: "+theme.Name, 1)
-			doc.AddText("Generated with "+theme.Level.String()+" design level.")
+			doc.AddText("Generated with " + theme.Level.String() + " design level.")
 
 			doc.AddHeading("Executive Summary", 2)
 			p := doc.AddParagraph()

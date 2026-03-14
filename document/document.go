@@ -196,10 +196,10 @@ func OpenFromBytes(data []byte) (*Document, error) {
 	}
 
 	doc := &Document{
-		pkg:     pkg,
-		rels:    packaging.NewRelationships(),
-		docRels: packaging.NewRelationships(),
-		ct:      packaging.NewContentTypes(),
+		pkg:      pkg,
+		rels:     packaging.NewRelationships(),
+		docRels:  packaging.NewRelationships(),
+		ct:       packaging.NewContentTypes(),
 		sections: []*Section{NewSection()},
 	}
 

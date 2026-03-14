@@ -7,8 +7,8 @@ import "encoding/xml"
 // so struct tags must use "namespaceURI localname" format.
 
 type readDocument struct {
-	XMLName xml.Name        `xml:"document"`
-	Body    readBody        `xml:"body"`
+	XMLName xml.Name `xml:"document"`
+	Body    readBody `xml:"body"`
 }
 
 type readBody struct {
