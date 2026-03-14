@@ -15,9 +15,10 @@ type Sheet struct {
 	colWidths   map[int]float64
 	columns     map[int]*Column
 	mergedCells []MergedCell
-	charts      []*Chart
-	maxRow      int
-	maxCol      int
+	charts             []*Chart
+	conditionalFormats []*ConditionalFormat
+	maxRow             int
+	maxCol             int
 }
 
 // MergedCell represents a merged cell range

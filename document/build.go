@@ -89,6 +89,30 @@ func (d *Document) buildDocumentXML(headerRelID, footerRelID string) ([]byte, er
 		R: nsR,
 	}
 
+	// Add TOC paragraphs before regular content
+	if d.toc != nil {
+		d.toc.BuildEntries(d.paragraphs)
+
+		// TOC title paragraph
+		tocTitle := NewParagraph()
+		tocTitle.SetStyle("Heading1")
+		tocTitleRun := tocTitle.AddRun()
+		tocTitleRun.SetText(d.toc.Title())
+		tocTitleRun.SetFont(d.toc.font.Bold())
+		doc.Body.Paragraphs = append(doc.Body.Paragraphs, tocTitle.toXML())
+
+		// TOC entry paragraphs
+		for _, entry := range d.toc.Entries() {
+			entryP := NewParagraph()
+			indentTwips := common.Pt(float64((entry.Level - 1) * 12))
+			entryP.SetIndent(indentTwips, common.Pt(0), common.Pt(0))
+			entryRun := entryP.AddRun()
+			entryRun.SetText(entry.Text)
+			entryRun.SetFont(d.toc.font)
+			doc.Body.Paragraphs = append(doc.Body.Paragraphs, entryP.toXML())
+		}
+	}
+
 	// Add paragraphs
 	for _, p := range d.paragraphs {
 		doc.Body.Paragraphs = append(doc.Body.Paragraphs, p.toXML())

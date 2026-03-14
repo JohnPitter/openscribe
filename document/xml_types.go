@@ -28,8 +28,15 @@ type xmlParagraph struct {
 }
 
 type xmlParagraphProperties struct {
-	Style         *xmlValue `xml:"w:pStyle,omitempty"`
-	Justification *xmlValue `xml:"w:jc,omitempty"`
+	Style         *xmlValue  `xml:"w:pStyle,omitempty"`
+	Indent        *xmlIndent `xml:"w:ind,omitempty"`
+	Justification *xmlValue  `xml:"w:jc,omitempty"`
+}
+
+type xmlIndent struct {
+	Left      string `xml:"w:left,attr,omitempty"`
+	Right     string `xml:"w:right,attr,omitempty"`
+	FirstLine string `xml:"w:firstLine,attr,omitempty"`
 }
 
 type xmlRun struct {

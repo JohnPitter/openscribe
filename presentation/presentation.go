@@ -14,6 +14,7 @@ import (
 type Presentation struct {
 	pkg    *packaging.Package
 	slides []*Slide
+	master *SlideMaster
 	theme  *style.Theme
 	width  common.Measurement
 	height common.Measurement

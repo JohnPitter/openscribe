@@ -1,6 +1,8 @@
 package document
 
 import (
+	"fmt"
+
 	"github.com/JohnPitter/openscribe/common"
 )
 
@@ -122,6 +124,21 @@ func (p *Paragraph) toXML() xmlParagraph {
 
 	if p.style != "" {
 		pPr.Style = &xmlValue{Val: p.style}
+		hasProps = true
+	}
+
+	if p.indent.Left.Points() > 0 || p.indent.Right.Points() > 0 || p.indent.FirstLine.Points() > 0 {
+		ind := &xmlIndent{}
+		if p.indent.Left.Points() > 0 {
+			ind.Left = fmt.Sprintf("%d", int(p.indent.Left.Points()*20))
+		}
+		if p.indent.Right.Points() > 0 {
+			ind.Right = fmt.Sprintf("%d", int(p.indent.Right.Points()*20))
+		}
+		if p.indent.FirstLine.Points() > 0 {
+			ind.FirstLine = fmt.Sprintf("%d", int(p.indent.FirstLine.Points()*20))
+		}
+		pPr.Indent = ind
 		hasProps = true
 	}
 

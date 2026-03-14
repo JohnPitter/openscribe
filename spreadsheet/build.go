@@ -161,10 +161,11 @@ func (wb *Workbook) buildWorkbookXML() ([]byte, error) {
 // XML types for worksheets
 
 type xmlWorksheet struct {
-	XMLName    xml.Name       `xml:"worksheet"`
-	Xmlns      string         `xml:"xmlns,attr"`
-	SheetData  xmlSheetData   `xml:"sheetData"`
-	MergeCells *xmlMergeCells `xml:"mergeCells,omitempty"`
+	XMLName               xml.Name                    `xml:"worksheet"`
+	Xmlns                 string                      `xml:"xmlns,attr"`
+	SheetData             xmlSheetData                `xml:"sheetData"`
+	MergeCells            *xmlMergeCells              `xml:"mergeCells,omitempty"`
+	ConditionalFormatting []xmlConditionalFormatting   `xml:"conditionalFormatting,omitempty"`
 }
 
 type xmlSheetData struct {
@@ -190,6 +191,64 @@ type xmlMergeCells struct {
 
 type xmlMergeCell struct {
 	Ref string `xml:"ref,attr"`
+}
+
+// Conditional formatting XML types
+
+type xmlConditionalFormatting struct {
+	SQRef  string      `xml:"sqref,attr"`
+	CFRule []xmlCFRule `xml:"cfRule"`
+}
+
+type xmlCFRule struct {
+	Type       string      `xml:"type,attr"`
+	Operator   string      `xml:"operator,attr,omitempty"`
+	Priority   string      `xml:"priority,attr"`
+	Formula    []string    `xml:"formula,omitempty"`
+	DXF        *xmlCFDXF   `xml:"dxf,omitempty"`
+	ColorScale *xmlCFColorScale `xml:"colorScale,omitempty"`
+	DataBar    *xmlCFDataBar    `xml:"dataBar,omitempty"`
+}
+
+type xmlCFDXF struct {
+	Font *xmlCFFont `xml:"font,omitempty"`
+	Fill *xmlCFFill `xml:"fill,omitempty"`
+}
+
+type xmlCFFont struct {
+	Bold   *xmlCFBoolVal `xml:"b,omitempty"`
+	Italic *xmlCFBoolVal `xml:"i,omitempty"`
+	Color  *xmlCFColor   `xml:"color,omitempty"`
+}
+
+type xmlCFBoolVal struct {
+	Val string `xml:"val,attr,omitempty"`
+}
+
+type xmlCFColor struct {
+	RGB string `xml:"rgb,attr"`
+}
+
+type xmlCFFill struct {
+	PatternFill xmlCFPatternFill `xml:"patternFill"`
+}
+
+type xmlCFPatternFill struct {
+	BgColor xmlCFColor `xml:"bgColor"`
+}
+
+type xmlCFColorScale struct {
+	CFVOs  []xmlCFVO   `xml:"cfvo"`
+	Colors []xmlCFColor `xml:"color"`
+}
+
+type xmlCFVO struct {
+	Type string `xml:"type,attr"`
+}
+
+type xmlCFDataBar struct {
+	CFVOs []xmlCFVO  `xml:"cfvo"`
+	Color xmlCFColor `xml:"color"`
 }
 
 func (wb *Workbook) buildSheetXML(sheet *Sheet) ([]byte, error) {
@@ -256,7 +315,162 @@ func (wb *Workbook) buildSheetXML(sheet *Sheet) ([]byte, error) {
 		ws.MergeCells = mc
 	}
 
+	// Conditional formatting
+	if len(sheet.conditionalFormats) > 0 {
+		ws.ConditionalFormatting = buildConditionalFormattingXML(sheet.conditionalFormats)
+	}
+
 	return xmlutil.MarshalXML(ws)
+}
+
+// buildConditionalFormattingXML converts conditional formats to XML structs
+func buildConditionalFormattingXML(formats []*ConditionalFormat) []xmlConditionalFormatting {
+	// Group by cell range
+	groups := make(map[string][]*ConditionalFormat)
+	var order []string
+	for _, cf := range formats {
+		if _, exists := groups[cf.cellRange]; !exists {
+			order = append(order, cf.cellRange)
+		}
+		groups[cf.cellRange] = append(groups[cf.cellRange], cf)
+	}
+
+	var result []xmlConditionalFormatting
+	priority := 1
+	for _, rangeRef := range order {
+		cfs := groups[rangeRef]
+		xcf := xmlConditionalFormatting{SQRef: rangeRef}
+
+		for _, cf := range cfs {
+			rule := xmlCFRule{
+				Priority: strconv.Itoa(priority),
+			}
+			priority++
+
+			switch cf.condType {
+			case ConditionColorScale:
+				rule.Type = "colorScale"
+				cs := &xmlCFColorScale{
+					CFVOs: []xmlCFVO{
+						{Type: "min"},
+						{Type: "max"},
+					},
+				}
+				minC := "FF000000"
+				maxC := "FFFFFFFF"
+				if cf.minColor != nil {
+					minC = fmt.Sprintf("FF%02X%02X%02X", cf.minColor.R, cf.minColor.G, cf.minColor.B)
+				}
+				if cf.maxColor != nil {
+					maxC = fmt.Sprintf("FF%02X%02X%02X", cf.maxColor.R, cf.maxColor.G, cf.maxColor.B)
+				}
+				cs.Colors = []xmlCFColor{
+					{RGB: minC},
+					{RGB: maxC},
+				}
+				rule.ColorScale = cs
+
+			case ConditionDataBar:
+				rule.Type = "dataBar"
+				barC := "FF638EC6"
+				if cf.barColor != nil {
+					barC = fmt.Sprintf("FF%02X%02X%02X", cf.barColor.R, cf.barColor.G, cf.barColor.B)
+				}
+				rule.DataBar = &xmlCFDataBar{
+					CFVOs: []xmlCFVO{
+						{Type: "min"},
+						{Type: "max"},
+					},
+					Color: xmlCFColor{RGB: barC},
+				}
+
+			default:
+				rule.Type = "cellIs"
+				switch cf.condType {
+				case ConditionGreaterThan:
+					rule.Operator = "greaterThan"
+				case ConditionLessThan:
+					rule.Operator = "lessThan"
+				case ConditionEqual:
+					rule.Operator = "equal"
+				case ConditionNotEqual:
+					rule.Operator = "notEqual"
+				case ConditionBetween:
+					rule.Operator = "between"
+				case ConditionContains:
+					rule.Type = "containsText"
+					rule.Operator = "containsText"
+				case ConditionBeginsWith:
+					rule.Type = "beginsWith"
+					rule.Operator = "beginsWith"
+				case ConditionEndsWith:
+					rule.Type = "endsWith"
+					rule.Operator = "endsWith"
+				case ConditionTop10:
+					rule.Type = "top10"
+					rule.Operator = ""
+				case ConditionAboveAverage:
+					rule.Type = "aboveAverage"
+					rule.Operator = ""
+				case ConditionBelowAverage:
+					rule.Type = "belowAverage"
+					rule.Operator = ""
+				case ConditionDuplicate:
+					rule.Type = "duplicateValues"
+					rule.Operator = ""
+				case ConditionUnique:
+					rule.Type = "uniqueValues"
+					rule.Operator = ""
+				}
+
+				if cf.value != "" {
+					rule.Formula = append(rule.Formula, cf.value)
+				}
+				if cf.condType == ConditionBetween && cf.value2 != "" {
+					rule.Formula = append(rule.Formula, cf.value2)
+				}
+
+				// Build DXF (differential formatting)
+				dxf := &xmlCFDXF{}
+				hasDXF := false
+
+				if cf.bgColor != nil {
+					rgb := fmt.Sprintf("FF%02X%02X%02X", cf.bgColor.R, cf.bgColor.G, cf.bgColor.B)
+					dxf.Fill = &xmlCFFill{
+						PatternFill: xmlCFPatternFill{
+							BgColor: xmlCFColor{RGB: rgb},
+						},
+					}
+					hasDXF = true
+				}
+
+				if cf.fontColor != nil || cf.bold || cf.italic {
+					font := &xmlCFFont{}
+					if cf.fontColor != nil {
+						rgb := fmt.Sprintf("FF%02X%02X%02X", cf.fontColor.R, cf.fontColor.G, cf.fontColor.B)
+						font.Color = &xmlCFColor{RGB: rgb}
+					}
+					if cf.bold {
+						font.Bold = &xmlCFBoolVal{}
+					}
+					if cf.italic {
+						font.Italic = &xmlCFBoolVal{}
+					}
+					dxf.Font = font
+					hasDXF = true
+				}
+
+				if hasDXF {
+					rule.DXF = dxf
+				}
+			}
+
+			xcf.CFRule = append(xcf.CFRule, rule)
+		}
+
+		result = append(result, xcf)
+	}
+	return result
 }
 
 // Shared strings XML
