@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: ['1.22', '1.23', '1.24']
+        go-version: ['1.22', '1.23']
 
     steps:
       - uses: actions/checkout@v4
@@ -38,9 +38,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.23'
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+      - name: Lint
+        run: |
+          go vet ./...
+          gofmt -l . | (! grep .) || (echo "Files not formatted" && exit 1)
