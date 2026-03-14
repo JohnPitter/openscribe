@@ -14,6 +14,9 @@ const (
 	ChartTypeArea
 	ChartTypeScatter
 	ChartTypeColumn
+	ChartTypeDonut
+	ChartTypeRadar
+	ChartTypeBarStacked
 )
 
 // ChartSeries represents a data series in a chart

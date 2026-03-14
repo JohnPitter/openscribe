@@ -11,6 +11,7 @@ const (
 	BorderStyleDouble
 	BorderStyleGroove
 	BorderStyleRidge
+	BorderStyleSingle = BorderStyleSolid // alias for OOXML compatibility
 )
 
 // Border represents a single border edge

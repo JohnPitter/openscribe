@@ -8,12 +8,14 @@ import (
 
 // Paragraph represents a paragraph in a document
 type Paragraph struct {
-	runs      []*Run
-	style     string
-	alignment common.TextAlignment
-	spacing   ParagraphSpacing
-	indent    ParagraphIndent
-	pageBreak bool
+	runs         []*Run
+	style        string
+	alignment    common.TextAlignment
+	spacing      ParagraphSpacing
+	indent       ParagraphIndent
+	pageBreak    bool
+	hyperlinks   []*Hyperlink
+	footnoteRefs []int
 }
 
 // ParagraphSpacing controls paragraph spacing
@@ -98,6 +100,28 @@ func (p *Paragraph) SetIndent(left, right, firstLine common.Measurement) {
 		Right:     right,
 		FirstLine: firstLine,
 	}
+}
+
+// AddHyperlink adds a hyperlink to the paragraph
+func (p *Paragraph) AddHyperlink(text, url string) *Hyperlink {
+	h := NewHyperlink(text, url)
+	p.hyperlinks = append(p.hyperlinks, h)
+	return h
+}
+
+// Hyperlinks returns all hyperlinks in this paragraph
+func (p *Paragraph) Hyperlinks() []*Hyperlink {
+	return p.hyperlinks
+}
+
+// AddFootnoteRef inserts a footnote reference mark into this paragraph
+func (p *Paragraph) AddFootnoteRef(id int) {
+	p.footnoteRefs = append(p.footnoteRefs, id)
+}
+
+// FootnoteRefs returns all footnote reference IDs in this paragraph
+func (p *Paragraph) FootnoteRefs() []int {
+	return p.footnoteRefs
 }
 
 // AddPageBreak adds a page break within this paragraph

@@ -12,19 +12,27 @@ import (
 
 // Document represents a DOCX document
 type Document struct {
-	pkg        *packaging.Package
-	paragraphs []*Paragraph
-	tables     []*Table
-	sections   []*Section
-	images     []*ImageRef
-	header     *HeaderFooter
-	footer     *HeaderFooter
-	toc        *TableOfContents
-	theme      *style.Theme
-	rels       *packaging.Relationships
-	docRels    *packaging.Relationships
-	ct         *packaging.ContentTypes
-	imageCount int
+	pkg           *packaging.Package
+	paragraphs    []*Paragraph
+	tables        []*Table
+	sections      []*Section
+	images        []*ImageRef
+	header        *HeaderFooter
+	footer        *HeaderFooter
+	toc           *TableOfContents
+	theme         *style.Theme
+	rels          *packaging.Relationships
+	docRels       *packaging.Relationships
+	ct            *packaging.ContentTypes
+	imageCount    int
+	lists         []*List
+	listCount     int
+	footnotes     []*Footnote
+	footnoteCount int
+	comments      []*Comment
+	commentCount  int
+	customStyles  []*CustomStyle
+	security      *common.SecurityOptions
 }
 
 // New creates a new empty DOCX document
@@ -118,6 +126,60 @@ func (d *Document) AddImage(imgData *common.ImageData, width, height common.Meas
 	}
 	d.images = append(d.images, ref)
 	return ref
+}
+
+// AddList adds a new list to the document and returns it
+func (d *Document) AddList(listType ListType) *List {
+	d.listCount++
+	l := NewList(listType, d.listCount)
+	d.lists = append(d.lists, l)
+	return l
+}
+
+// Lists returns all lists in the document
+func (d *Document) Lists() []*List {
+	return d.lists
+}
+
+// AddFootnote adds a footnote and returns its reference ID
+func (d *Document) AddFootnote(text string) int {
+	d.footnoteCount++
+	fn := &Footnote{
+		id:   d.footnoteCount,
+		text: text,
+	}
+	d.footnotes = append(d.footnotes, fn)
+	return fn.id
+}
+
+// Footnotes returns all footnotes
+func (d *Document) Footnotes() []*Footnote {
+	return d.footnotes
+}
+
+// AddComment adds a comment and returns it
+func (d *Document) AddComment(author, text string) *Comment {
+	d.commentCount++
+	c := NewComment(d.commentCount, author, text)
+	d.comments = append(d.comments, c)
+	return c
+}
+
+// Comments returns all comments
+func (d *Document) Comments() []*Comment {
+	return d.comments
+}
+
+// AddStyle adds a custom paragraph style and returns it
+func (d *Document) AddStyle(name, basedOn string) *CustomStyle {
+	cs := NewCustomStyle(name, basedOn)
+	d.customStyles = append(d.customStyles, cs)
+	return cs
+}
+
+// CustomStyles returns all custom styles
+func (d *Document) CustomStyles() []*CustomStyle {
+	return d.customStyles
 }
 
 // AddPageBreak adds a page break

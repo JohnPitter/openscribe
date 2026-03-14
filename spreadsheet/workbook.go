@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/JohnPitter/openscribe/common"
 	"github.com/JohnPitter/openscribe/internal/packaging"
 	"github.com/JohnPitter/openscribe/style"
 )
@@ -16,6 +17,8 @@ type Workbook struct {
 	sharedStrings []string
 	stringIndex   map[string]int
 	theme         *style.Theme
+	namedRanges   []*NamedRange
+	security      *common.SecurityOptions
 }
 
 // New creates a new empty workbook

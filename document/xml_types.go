@@ -29,8 +29,14 @@ type xmlParagraph struct {
 
 type xmlParagraphProperties struct {
 	Style         *xmlValue  `xml:"w:pStyle,omitempty"`
+	NumPr         *xmlNumPr  `xml:"w:numPr,omitempty"`
 	Indent        *xmlIndent `xml:"w:ind,omitempty"`
 	Justification *xmlValue  `xml:"w:jc,omitempty"`
+}
+
+type xmlNumPr struct {
+	Ilvl  *xmlValue `xml:"w:ilvl,omitempty"`
+	NumID *xmlValue `xml:"w:numId,omitempty"`
 }
 
 type xmlIndent struct {

@@ -17,6 +17,12 @@ type Sheet struct {
 	mergedCells        []MergedCell
 	charts             []*Chart
 	conditionalFormats []*ConditionalFormat
+	validations        []*Validation
+	comments           []*Comment
+	protection         *SheetProtection
+	autoFilter         *AutoFilter
+	freezePane         *FreezePane
+	printSettings      *PrintSettings
 	maxRow             int
 	maxCol             int
 }

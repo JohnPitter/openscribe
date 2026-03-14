@@ -116,8 +116,8 @@ func TestContentTypes(t *testing.T) {
 	ct := NewContentTypes()
 	ct.AddOverride("/word/document.xml", ContentTypeDocx)
 
-	if len(ct.Defaults) != 4 {
-		t.Errorf("expected 4 defaults, got %d", len(ct.Defaults))
+	if len(ct.Defaults) != 5 {
+		t.Errorf("expected 5 defaults, got %d", len(ct.Defaults))
 	}
 	if len(ct.Overrides) != 1 {
 		t.Errorf("expected 1 override, got %d", len(ct.Overrides))

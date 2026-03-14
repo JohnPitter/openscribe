@@ -8,24 +8,28 @@ import (
 
 // Common content types
 const (
-	ContentTypeRelationships = "application/vnd.openxmlformats-package.relationships+xml"
-	ContentTypeXML           = "application/xml"
-	ContentTypeDocx          = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
-	ContentTypeStyles        = "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"
-	ContentTypeXlsx          = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
-	ContentTypeWorksheet     = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
-	ContentTypeSharedStrings = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"
-	ContentTypePptx          = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
-	ContentTypeSlide         = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml"
-	ContentTypeSlideMaster   = "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"
-	ContentTypeSlideLayout   = "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"
-	ContentTypePNG           = "image/png"
-	ContentTypeJPEG          = "image/jpeg"
-	ContentTypeCoreProps     = "application/vnd.openxmlformats-package.core-properties+xml"
-	ContentTypeChart         = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
-	ContentTypeDrawing       = "application/vnd.openxmlformats-officedocument.drawing+xml"
-	ContentTypeHeader        = "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
-	ContentTypeFooter        = "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"
+	ContentTypeRelationships       = "application/vnd.openxmlformats-package.relationships+xml"
+	ContentTypeXML                 = "application/xml"
+	ContentTypeDocx                = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+	ContentTypeStyles              = "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"
+	ContentTypeXlsx                = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+	ContentTypeWorksheet           = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+	ContentTypeSharedStrings       = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"
+	ContentTypePptx                = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
+	ContentTypeSlide               = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml"
+	ContentTypeSlideMaster         = "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"
+	ContentTypeSlideLayout         = "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"
+	ContentTypePNG                 = "image/png"
+	ContentTypeJPEG                = "image/jpeg"
+	ContentTypeCoreProps           = "application/vnd.openxmlformats-package.core-properties+xml"
+	ContentTypeChart               = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+	ContentTypeDrawing             = "application/vnd.openxmlformats-officedocument.drawing+xml"
+	ContentTypeHeader              = "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
+	ContentTypeFooter              = "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"
+	ContentTypeNumbering           = "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"
+	ContentTypeFootnotes           = "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"
+	ContentTypeComments            = "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
+	ContentTypeSpreadsheetComments = "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"
 )
 
 // ContentTypes represents [Content_Types].xml
@@ -57,6 +61,7 @@ func NewContentTypes() *ContentTypes {
 			{Extension: "xml", ContentType: ContentTypeXML},
 			{Extension: "png", ContentType: ContentTypePNG},
 			{Extension: "jpeg", ContentType: ContentTypeJPEG},
+			{Extension: "vml", ContentType: "application/vnd.openxmlformats-officedocument.vmlDrawing"},
 		},
 	}
 }

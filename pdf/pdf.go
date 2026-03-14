@@ -14,6 +14,7 @@ type Document struct {
 	pages    []*Page
 	theme    *style.Theme
 	metadata Metadata
+	security *common.SecurityOptions
 }
 
 // Metadata holds document metadata

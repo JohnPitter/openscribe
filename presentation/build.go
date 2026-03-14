@@ -9,6 +9,12 @@ import (
 	"github.com/JohnPitter/openscribe/internal/xmlutil"
 )
 
+// RelTypeNotesSlide is the relationship type for notes slides
+const relTypeNotesSlide = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide"
+
+// ContentTypeNotesSlide is the content type for notes slides
+const contentTypeNotesSlide = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"
+
 func (p *Presentation) build() error {
 	p.pkg = packaging.NewPackage()
 
@@ -16,8 +22,9 @@ func (p *Presentation) build() error {
 
 	// Build each slide
 	for i, slide := range p.slides {
-		// Handle image relationships for this slide
+		// Handle image relationships and notes for this slide
 		slideRels := packaging.NewRelationships()
+		hasRels := false
 		imgIdx := 0
 		for _, elem := range slide.elements {
 			if img, ok := elem.(*SlideImage); ok {
@@ -27,10 +34,34 @@ func (p *Presentation) build() error {
 				p.pkg.AddFile(mediaPath, img.data.Data)
 				relTarget := fmt.Sprintf("../media/slide%d_img%d%s", i+1, imgIdx, ext)
 				img.relID = slideRels.Add(packaging.RelTypeImage, relTarget)
+				hasRels = true
 			}
 		}
 
-		if imgIdx > 0 {
+		// Build notes part if the slide has formatted notes or plain notes
+		hasNotes := len(slide.formattedNotes) > 0 || slide.notes != ""
+		notesRelID := ""
+		if hasNotes {
+			notesRelID = slideRels.Add(relTypeNotesSlide, fmt.Sprintf("../notesSlides/notesSlide%d.xml", i+1))
+			hasRels = true
+
+			notesData, err := buildNotesXML(slide, i+1, notesRelID)
+			if err != nil {
+				return fmt.Errorf("build notes slide %d: %w", i+1, err)
+			}
+			p.pkg.AddFile(fmt.Sprintf("ppt/notesSlides/notesSlide%d.xml", i+1), notesData)
+
+			// Notes slide rels (points back to slide)
+			notesRels := packaging.NewRelationships()
+			notesRels.Add(packaging.RelTypeSlide, fmt.Sprintf("../slides/slide%d.xml", i+1))
+			notesRelsData, err := notesRels.Marshal()
+			if err != nil {
+				return fmt.Errorf("marshal notes rels: %w", err)
+			}
+			p.pkg.AddFile(fmt.Sprintf("ppt/notesSlides/_rels/notesSlide%d.xml.rels", i+1), notesRelsData)
+		}
+
+		if hasRels {
 			slideRelsData, err := slideRels.Marshal()
 			if err != nil {
 				return fmt.Errorf("marshal slide rels: %w", err)
@@ -73,8 +104,12 @@ func (p *Presentation) build() error {
 	// Content types
 	ct := packaging.NewContentTypes()
 	ct.AddOverride("/ppt/presentation.xml", packaging.ContentTypePptx)
-	for i := range p.slides {
+	for i, slide := range p.slides {
 		ct.AddOverride(fmt.Sprintf("/ppt/slides/slide%d.xml", i+1), packaging.ContentTypeSlide)
+		hasNotes := len(slide.formattedNotes) > 0 || slide.notes != ""
+		if hasNotes {
+			ct.AddOverride(fmt.Sprintf("/ppt/notesSlides/notesSlide%d.xml", i+1), contentTypeNotesSlide)
+		}
 	}
 	ctData, err := ct.Marshal()
 	if err != nil {
@@ -176,6 +211,7 @@ type xmlSlide struct {
 	R          string         `xml:"xmlns:r,attr"`
 	CSld       xmlCSld        `xml:"p:cSld"`
 	Transition *xmlTransition `xml:"p:transition,omitempty"`
+	Timing     *xmlTiming     `xml:"p:timing,omitempty"`
 }
 
 type xmlCSld struct {
@@ -200,10 +236,12 @@ type xmlSrgbClr struct {
 }
 
 type xmlSpTree struct {
-	NvGrpSpPr xmlNvGrpSpPr `xml:"p:nvGrpSpPr"`
-	GrpSpPr   xmlGrpSpPr   `xml:"p:grpSpPr"`
-	Shapes    []xmlSp      `xml:"p:sp"`
-	Pics      []xmlPic     `xml:"p:pic"`
+	NvGrpSpPr     xmlNvGrpSpPr      `xml:"p:nvGrpSpPr"`
+	GrpSpPr       xmlGrpSpPr        `xml:"p:grpSpPr"`
+	Shapes        []xmlSp           `xml:"p:sp"`
+	Pics          []xmlPic          `xml:"p:pic"`
+	GraphicFrames []xmlGraphicFrame `xml:"p:graphicFrame"`
+	CxnSps        []xmlCxnSp        `xml:"p:cxnSp"`
 }
 
 type xmlNvGrpSpPr struct {
@@ -236,6 +274,12 @@ type xmlSpPr struct {
 	Xfrm      *xmlXfrm      `xml:"a:xfrm,omitempty"`
 	PrstGeom  *xmlPrstGeom  `xml:"a:prstGeom,omitempty"`
 	SolidFill *xmlSolidFill `xml:"a:solidFill,omitempty"`
+	Ln        *xmlLn        `xml:"a:ln,omitempty"`
+}
+
+type xmlLn struct {
+	W         string        `xml:"w,attr,omitempty"`
+	SolidFill *xmlSolidFill `xml:"a:solidFill,omitempty"`
 }
 
 type xmlXfrm struct {
@@ -263,8 +307,10 @@ type xmlTxBody struct {
 }
 
 type xmlAPara struct {
-	PPr  *xmlAPPr  `xml:"a:pPr,omitempty"`
-	Runs []xmlARun `xml:"a:r"`
+	PPr  *xmlAPPr    `xml:"a:pPr,omitempty"`
+	Runs []xmlARun   `xml:"a:r"`
+	Flds []xmlAFld   `xml:"a:fld"`
+	EndR *xmlAEndRPr `xml:"a:endParaRPr,omitempty"`
 }
 
 type xmlAPPr struct {
@@ -282,6 +328,165 @@ type xmlARPr struct {
 	B         string        `xml:"b,attr,omitempty"`
 	I         string        `xml:"i,attr,omitempty"`
 	SolidFill *xmlSolidFill `xml:"a:solidFill,omitempty"`
+}
+
+type xmlAFld struct {
+	ID   string   `xml:"id,attr"`
+	Type string   `xml:"type,attr"`
+	RPr  *xmlARPr `xml:"a:rPr,omitempty"`
+	T    string   `xml:"a:t"`
+}
+
+type xmlAEndRPr struct {
+	Lang string `xml:"lang,attr,omitempty"`
+}
+
+// Table XML types
+type xmlGraphicFrame struct {
+	XMLName     xml.Name       `xml:"p:graphicFrame"`
+	NvGrFramePr xmlNvGrFramePr `xml:"p:nvGraphicFramePr"`
+	Xfrm        xmlXfrm        `xml:"p:xfrm"`
+	Graphic     xmlGraphic     `xml:"a:graphic"`
+}
+
+type xmlNvGrFramePr struct {
+	CNvPr        xmlCNvPr  `xml:"p:cNvPr"`
+	CNvGrFramePr xmlEmpty2 `xml:"p:cNvGraphicFramePr"`
+	NvPr         xmlEmpty2 `xml:"p:nvPr"`
+}
+
+type xmlGraphic struct {
+	GraphicData xmlGraphicData `xml:"a:graphicData"`
+}
+
+type xmlGraphicData struct {
+	URI string `xml:"uri,attr"`
+	Tbl xmlTbl `xml:"a:tbl"`
+}
+
+type xmlTbl struct {
+	TblPr   xmlTblPr    `xml:"a:tblPr"`
+	TblGrid xmlTblGrid  `xml:"a:tblGrid"`
+	Rows    []xmlTblRow `xml:"a:tr"`
+}
+
+type xmlTblPr struct {
+	FirstRow string `xml:"firstRow,attr,omitempty"`
+	BandRow  string `xml:"bandRow,attr,omitempty"`
+}
+
+type xmlTblGrid struct {
+	GridCols []xmlTblGridCol `xml:"a:gridCol"`
+}
+
+type xmlTblGridCol struct {
+	W string `xml:"w,attr"`
+}
+
+type xmlTblRow struct {
+	H     string       `xml:"h,attr"`
+	Cells []xmlTblCell `xml:"a:tc"`
+}
+
+type xmlTblCell struct {
+	TxBody xmlTblCellTxBody `xml:"a:txBody"`
+	TcPr   *xmlTcPr         `xml:"a:tcPr,omitempty"`
+}
+
+type xmlTblCellTxBody struct {
+	BodyPr xmlEmpty2  `xml:"a:bodyPr"`
+	Paras  []xmlAPara `xml:"a:p"`
+}
+
+type xmlTcPr struct {
+	SolidFill *xmlSolidFill `xml:"a:solidFill,omitempty"`
+}
+
+// Connector XML types
+type xmlCxnSp struct {
+	XMLName   xml.Name     `xml:"p:cxnSp"`
+	NvCxnSpPr xmlNvCxnSpPr `xml:"p:nvCxnSpPr"`
+	SpPr      xmlSpPr      `xml:"p:spPr"`
+}
+
+type xmlNvCxnSpPr struct {
+	CNvPr      xmlCNvPr  `xml:"p:cNvPr"`
+	CNvCxnSpPr xmlEmpty2 `xml:"p:cNvCxnSpPr"`
+	NvPr       xmlEmpty2 `xml:"p:nvPr"`
+}
+
+// Animation/Timing XML types
+type xmlTiming struct {
+	XMLName xml.Name `xml:"p:timing"`
+	TnLst   xmlTnLst `xml:"p:tnLst"`
+}
+
+type xmlTnLst struct {
+	Par xmlPar `xml:"p:par"`
+}
+
+type xmlPar struct {
+	CTn xmlCTn `xml:"p:cTn"`
+}
+
+type xmlCTn struct {
+	ID       string       `xml:"id,attr"`
+	Dur      string       `xml:"dur,attr,omitempty"`
+	Restart  string       `xml:"restart,attr,omitempty"`
+	NodeType string       `xml:"nodeType,attr,omitempty"`
+	ChildLst *xmlChildLst `xml:"p:childTnLst,omitempty"`
+}
+
+type xmlChildLst struct {
+	Seq []xmlSeq `xml:"p:seq"`
+}
+
+type xmlSeq struct {
+	CTn xmlSeqCTn `xml:"p:cTn"`
+}
+
+type xmlSeqCTn struct {
+	ID       string          `xml:"id,attr"`
+	Dur      string          `xml:"dur,attr,omitempty"`
+	NodeType string          `xml:"nodeType,attr,omitempty"`
+	ChildLst *xmlSeqChildLst `xml:"p:childTnLst,omitempty"`
+}
+
+type xmlSeqChildLst struct {
+	Pars []xmlAnimPar `xml:"p:par"`
+}
+
+type xmlAnimPar struct {
+	CTn xmlAnimCTn `xml:"p:cTn"`
+}
+
+type xmlAnimCTn struct {
+	ID          string        `xml:"id,attr"`
+	PresetID    string        `xml:"presetID,attr,omitempty"`
+	PresetClass string        `xml:"presetClass,attr,omitempty"`
+	Fill        string        `xml:"fill,attr,omitempty"`
+	NodeType    string        `xml:"nodeType,attr,omitempty"`
+	Dur         string        `xml:"dur,attr,omitempty"`
+	Delay       string        `xml:"decel,attr,omitempty"`
+	StCondLst   *xmlStCondLst `xml:"p:stCondLst,omitempty"`
+}
+
+type xmlStCondLst struct {
+	Conds []xmlCond `xml:"p:cond"`
+}
+
+type xmlCond struct {
+	Delay string `xml:"delay,attr,omitempty"`
+	Evt   string `xml:"evt,attr,omitempty"`
+}
+
+// Notes XML types
+type xmlNotes struct {
+	XMLName xml.Name `xml:"p:notes"`
+	P       string   `xml:"xmlns:p,attr"`
+	A       string   `xml:"xmlns:a,attr"`
+	R       string   `xml:"xmlns:r,attr"`
+	CSld    xmlCSld  `xml:"p:cSld"`
 }
 
 func (p *Presentation) buildSlideXML(slide *Slide) ([]byte, error) {
@@ -321,7 +526,22 @@ func (p *Presentation) buildSlideXML(slide *Slide) ([]byte, error) {
 			pic := buildPictureXML(e, shapeID)
 			xs.CSld.SpTree.Pics = append(xs.CSld.SpTree.Pics, pic)
 			shapeID++
+		case *SlideTable:
+			gf := buildTableXML(e, shapeID)
+			xs.CSld.SpTree.GraphicFrames = append(xs.CSld.SpTree.GraphicFrames, gf)
+			shapeID++
+		case *Connector:
+			cxn := buildConnectorXML(e, shapeID)
+			xs.CSld.SpTree.CxnSps = append(xs.CSld.SpTree.CxnSps, cxn)
+			shapeID++
 		}
+	}
+
+	// Slide number shape
+	if p.showSlideNumbers {
+		sp := buildSlideNumberXML(shapeID, p.width, p.height)
+		xs.CSld.SpTree.Shapes = append(xs.CSld.SpTree.Shapes, sp)
+		shapeID++
 	}
 
 	// Transition
@@ -351,6 +571,11 @@ func (p *Presentation) buildSlideXML(slide *Slide) ([]byte, error) {
 		case TransitionDissolve:
 			xs.Transition.Dissolve = &xmlEmpty2{}
 		}
+	}
+
+	// Animations
+	if len(slide.animations) > 0 {
+		xs.Timing = buildTimingXML(slide.animations)
 	}
 
 	return xmlutil.MarshalXML(xs)
@@ -422,29 +647,7 @@ func buildTextBoxXML(tb *TextBox, id int) xmlSp {
 }
 
 func buildShapeXML(sh *Shape, id int) xmlSp {
-	prst := "rect"
-	switch sh.shapeType {
-	case ShapeRoundedRectangle:
-		prst = "roundRect"
-	case ShapeCircle, ShapeEllipse:
-		prst = "ellipse"
-	case ShapeTriangle:
-		prst = "triangle"
-	case ShapeArrowRight:
-		prst = "rightArrow"
-	case ShapeArrowLeft:
-		prst = "leftArrow"
-	case ShapeArrowUp:
-		prst = "upArrow"
-	case ShapeArrowDown:
-		prst = "downArrow"
-	case ShapeStar:
-		prst = "star5"
-	case ShapeDiamond:
-		prst = "diamond"
-	case ShapeLine:
-		prst = "line"
-	}
+	prst := shapePresetGeom(sh.shapeType)
 
 	sp := xmlSp{
 		NvSpPr: xmlNvSpPr{
@@ -483,6 +686,45 @@ func buildShapeXML(sh *Shape, id int) xmlSp {
 	return sp
 }
 
+func shapePresetGeom(st ShapeType) string {
+	switch st {
+	case ShapeRoundedRectangle:
+		return "roundRect"
+	case ShapeCircle, ShapeEllipse:
+		return "ellipse"
+	case ShapeTriangle:
+		return "triangle"
+	case ShapeArrowRight:
+		return "rightArrow"
+	case ShapeArrowLeft:
+		return "leftArrow"
+	case ShapeArrowUp:
+		return "upArrow"
+	case ShapeArrowDown:
+		return "downArrow"
+	case ShapeStar:
+		return "star5"
+	case ShapeDiamond:
+		return "diamond"
+	case ShapeLine:
+		return "line"
+	case ShapeCallout:
+		return "wedgeRoundRectCallout"
+	case ShapeFlowchartProcess:
+		return "flowChartProcess"
+	case ShapeFlowchartDecision:
+		return "flowChartDecision"
+	case ShapeFlowchartTerminator:
+		return "flowChartTerminator"
+	case ShapeBrace:
+		return "leftBrace"
+	case ShapeBracket:
+		return "leftBracket"
+	default:
+		return "rect"
+	}
+}
+
 func buildPictureXML(img *SlideImage, id int) xmlPic {
 	return xmlPic{
 		NvPicPr: xmlNvPicPr{
@@ -499,6 +741,309 @@ func buildPictureXML(img *SlideImage, id int) xmlPic {
 			PrstGeom: &xmlPrstGeom{Prst: "rect"},
 		},
 	}
+}
+
+func buildTableXML(tbl *SlideTable, id int) xmlGraphicFrame {
+	colW := tbl.width.EMUs() / int64(tbl.cols)
+	rowH := tbl.height.EMUs() / int64(tbl.rows)
+
+	grid := xmlTblGrid{}
+	for c := 0; c < tbl.cols; c++ {
+		grid.GridCols = append(grid.GridCols, xmlTblGridCol{
+			W: fmt.Sprintf("%d", colW),
+		})
+	}
+
+	var rows []xmlTblRow
+	for r := 0; r < tbl.rows; r++ {
+		row := xmlTblRow{
+			H: fmt.Sprintf("%d", rowH),
+		}
+		for c := 0; c < tbl.cols; c++ {
+			cell := tbl.cells[r][c]
+			tc := xmlTblCell{
+				TxBody: xmlTblCellTxBody{
+					Paras: []xmlAPara{
+						{
+							Runs: []xmlARun{
+								{
+									RPr: buildCellRunPr(cell),
+									T:   cell.text,
+								},
+							},
+						},
+					},
+				},
+			}
+
+			// Cell background
+			bg := cell.background
+			if bg == nil && r == 0 && tbl.headerBg != nil {
+				bg = tbl.headerBg
+			}
+			if bg != nil {
+				tc.TcPr = &xmlTcPr{
+					SolidFill: &xmlSolidFill{
+						SrgbClr: xmlSrgbClr{Val: colorToHex(*bg)},
+					},
+				}
+			}
+
+			row.Cells = append(row.Cells, tc)
+		}
+		rows = append(rows, row)
+	}
+
+	return xmlGraphicFrame{
+		NvGrFramePr: xmlNvGrFramePr{
+			CNvPr: xmlCNvPr{ID: fmt.Sprintf("%d", id), Name: fmt.Sprintf("Table %d", id)},
+		},
+		Xfrm: xmlXfrm{
+			Off: xmlOff{X: fmt.Sprintf("%d", tbl.x.EMUs()), Y: fmt.Sprintf("%d", tbl.y.EMUs())},
+			Ext: xmlExt{Cx: fmt.Sprintf("%d", tbl.width.EMUs()), Cy: fmt.Sprintf("%d", tbl.height.EMUs())},
+		},
+		Graphic: xmlGraphic{
+			GraphicData: xmlGraphicData{
+				URI: "http://schemas.openxmlformats.org/drawingml/2006/table",
+				Tbl: xmlTbl{
+					TblPr: xmlTblPr{
+						FirstRow: "1",
+						BandRow:  "1",
+					},
+					TblGrid: grid,
+					Rows:    rows,
+				},
+			},
+		},
+	}
+}
+
+func buildCellRunPr(cell *SlideTableCell) *xmlARPr {
+	rPr := &xmlARPr{Lang: "en-US", Sz: "1200"}
+	if cell.font != nil {
+		rPr.Sz = fmt.Sprintf("%d", int(cell.font.Size*100))
+		if cell.font.Weight >= common.FontWeightBold {
+			rPr.B = "1"
+		}
+		if cell.font.Style == common.FontStyleItalic {
+			rPr.I = "1"
+		}
+	}
+	return rPr
+}
+
+func buildConnectorXML(conn *Connector, id int) xmlCxnSp {
+	// Calculate position and size from endpoints
+	x := conn.x1.EMUs()
+	y := conn.y1.EMUs()
+	cx := conn.x2.EMUs() - conn.x1.EMUs()
+	cy := conn.y2.EMUs() - conn.y1.EMUs()
+	if cx < 0 {
+		x = conn.x2.EMUs()
+		cx = -cx
+	}
+	if cy < 0 {
+		y = conn.y2.EMUs()
+		cy = -cy
+	}
+	// Ensure minimum size
+	if cx == 0 {
+		cx = 1
+	}
+	if cy == 0 {
+		cy = 1
+	}
+
+	prst := "line"
+	switch conn.connType {
+	case ConnectorElbow:
+		prst = "bentConnector3"
+	case ConnectorCurved:
+		prst = "curvedConnector3"
+	}
+
+	return xmlCxnSp{
+		NvCxnSpPr: xmlNvCxnSpPr{
+			CNvPr: xmlCNvPr{ID: fmt.Sprintf("%d", id), Name: fmt.Sprintf("Connector %d", id)},
+		},
+		SpPr: xmlSpPr{
+			Xfrm: &xmlXfrm{
+				Off: xmlOff{X: fmt.Sprintf("%d", x), Y: fmt.Sprintf("%d", y)},
+				Ext: xmlExt{Cx: fmt.Sprintf("%d", cx), Cy: fmt.Sprintf("%d", cy)},
+			},
+			PrstGeom: &xmlPrstGeom{Prst: prst},
+			Ln: &xmlLn{
+				W: fmt.Sprintf("%d", conn.width.EMUs()),
+				SolidFill: &xmlSolidFill{
+					SrgbClr: xmlSrgbClr{Val: colorToHex(conn.color)},
+				},
+			},
+		},
+	}
+}
+
+func buildSlideNumberXML(id int, slideWidth, slideHeight common.Measurement) xmlSp {
+	// Position slide number in the bottom-right footer area
+	numWidth := common.In(1.5)
+	numHeight := common.In(0.4)
+	x := common.EMU(slideWidth.EMUs() - numWidth.EMUs() - common.In(0.5).EMUs())
+	y := common.EMU(slideHeight.EMUs() - numHeight.EMUs() - common.In(0.25).EMUs())
+
+	return xmlSp{
+		NvSpPr: xmlNvSpPr{
+			CNvPr: xmlCNvPr{ID: fmt.Sprintf("%d", id), Name: fmt.Sprintf("Slide Number %d", id)},
+		},
+		SpPr: xmlSpPr{
+			Xfrm: &xmlXfrm{
+				Off: xmlOff{X: fmt.Sprintf("%d", x.EMUs()), Y: fmt.Sprintf("%d", y.EMUs())},
+				Ext: xmlExt{Cx: fmt.Sprintf("%d", numWidth.EMUs()), Cy: fmt.Sprintf("%d", numHeight.EMUs())},
+			},
+			PrstGeom: &xmlPrstGeom{Prst: "rect"},
+		},
+		TxBody: &xmlTxBody{
+			Paras: []xmlAPara{
+				{
+					PPr: &xmlAPPr{Algn: "r"},
+					Flds: []xmlAFld{
+						{
+							ID:   "{B6F15528-F159-4107-2052-41F4E69A2D00}",
+							Type: "slidenum",
+							RPr:  &xmlARPr{Lang: "en-US", Sz: "1000"},
+							T:    "<#>",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func buildTimingXML(animations []*Animation) *xmlTiming {
+	var pars []xmlAnimPar
+	for i, anim := range animations {
+		presetClass := "entr"
+		if !animationIsEntrance(anim.Type) {
+			presetClass = "exit"
+		}
+
+		ctn := xmlAnimCTn{
+			ID:          fmt.Sprintf("%d", i+3),
+			PresetID:    fmt.Sprintf("%d", animationPresetID(anim.Type)),
+			PresetClass: presetClass,
+			Fill:        "hold",
+			Dur:         fmt.Sprintf("%d", anim.Duration),
+		}
+
+		// Trigger conditions
+		switch anim.Trigger {
+		case TriggerOnClick:
+			ctn.StCondLst = &xmlStCondLst{
+				Conds: []xmlCond{{Delay: "0", Evt: "onClick"}},
+			}
+			ctn.NodeType = "clickEffect"
+		case TriggerWithPrevious:
+			ctn.StCondLst = &xmlStCondLst{
+				Conds: []xmlCond{{Delay: fmt.Sprintf("%d", anim.Delay)}},
+			}
+			ctn.NodeType = "withEffect"
+		case TriggerAfterPrevious:
+			ctn.StCondLst = &xmlStCondLst{
+				Conds: []xmlCond{{Delay: fmt.Sprintf("%d", anim.Delay)}},
+			}
+			ctn.NodeType = "afterEffect"
+		}
+
+		pars = append(pars, xmlAnimPar{CTn: ctn})
+	}
+
+	return &xmlTiming{
+		TnLst: xmlTnLst{
+			Par: xmlPar{
+				CTn: xmlCTn{
+					ID:       "1",
+					Dur:      "indefinite",
+					Restart:  "never",
+					NodeType: "tmRoot",
+					ChildLst: &xmlChildLst{
+						Seq: []xmlSeq{
+							{
+								CTn: xmlSeqCTn{
+									ID:       "2",
+									Dur:      "indefinite",
+									NodeType: "mainSeq",
+									ChildLst: &xmlSeqChildLst{
+										Pars: pars,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func buildNotesXML(slide *Slide, slideNum int, _ string) ([]byte, error) {
+	notes := xmlNotes{
+		P: "http://schemas.openxmlformats.org/presentationml/2006/main",
+		A: "http://schemas.openxmlformats.org/drawingml/2006/main",
+		R: "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+	}
+
+	notes.CSld.SpTree.NvGrpSpPr.CNvPr = xmlCNvPr{ID: "1", Name: ""}
+
+	// Notes text shape
+	sp := xmlSp{
+		NvSpPr: xmlNvSpPr{
+			CNvPr: xmlCNvPr{ID: "2", Name: "Notes Placeholder"},
+		},
+		SpPr: xmlSpPr{
+			Xfrm: &xmlXfrm{
+				Off: xmlOff{X: "0", Y: "0"},
+				Ext: xmlExt{Cx: fmt.Sprintf("%d", common.In(6).EMUs()), Cy: fmt.Sprintf("%d", common.In(4).EMUs())},
+			},
+		},
+	}
+
+	txBody := &xmlTxBody{}
+
+	if len(slide.formattedNotes) > 0 {
+		for _, np := range slide.formattedNotes {
+			para := xmlAPara{}
+			rPr := &xmlARPr{Lang: "en-US"}
+			if np.FontSize > 0 {
+				rPr.Sz = fmt.Sprintf("%d", int(np.FontSize*100))
+			} else {
+				rPr.Sz = "1200"
+			}
+			if np.Bold {
+				rPr.B = "1"
+			}
+			if np.Italic {
+				rPr.I = "1"
+			}
+			para.Runs = append(para.Runs, xmlARun{
+				RPr: rPr,
+				T:   np.Text,
+			})
+			txBody.Paras = append(txBody.Paras, para)
+		}
+	} else if slide.notes != "" {
+		txBody.Paras = append(txBody.Paras, xmlAPara{
+			Runs: []xmlARun{
+				{
+					RPr: &xmlARPr{Lang: "en-US", Sz: "1200"},
+					T:   slide.notes,
+				},
+			},
+		})
+	}
+
+	sp.TxBody = txBody
+	notes.CSld.SpTree.Shapes = append(notes.CSld.SpTree.Shapes, sp)
+
+	return xmlutil.MarshalXML(notes)
 }
 
 func colorToHex(c common.Color) string {

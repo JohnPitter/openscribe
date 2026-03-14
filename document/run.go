@@ -18,6 +18,7 @@ type Run struct {
 	size       float64
 	fontFamily string
 	highlight  string
+	comment    *Comment
 }
 
 // NewRun creates a new text run
@@ -71,6 +72,12 @@ func (r *Run) SetFontFamily(family string) *Run { r.fontFamily = family; return 
 
 // SetHighlight sets text highlight color
 func (r *Run) SetHighlight(color string) *Run { r.highlight = color; return r }
+
+// SetComment associates a comment with this run
+func (r *Run) SetComment(c *Comment) *Run { r.comment = c; return r }
+
+// Comment returns the associated comment, or nil
+func (r *Run) Comment() *Comment { return r.comment }
 
 // toXML creates the w:r XML element
 func (r *Run) toXML() xmlRun {

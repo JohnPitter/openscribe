@@ -23,6 +23,7 @@ func (wb *Workbook) build() error {
 	ct := packaging.NewContentTypes()
 	chartGlobalIdx := 0
 
+	commentIdx := 0
 	for i, sheet := range wb.sheets {
 		sheetPath := fmt.Sprintf("xl/worksheets/sheet%d.xml", i+1)
 		data, err := wb.buildSheetXML(sheet)
@@ -33,18 +34,21 @@ func (wb *Workbook) build() error {
 		wbRels.Add(packaging.RelTypeWorksheet, fmt.Sprintf("worksheets/sheet%d.xml", i+1))
 		ct.AddOverride(fmt.Sprintf("/xl/worksheets/sheet%d.xml", i+1), packaging.ContentTypeWorksheet)
 
+		// Track if we need sheet rels
+		hasCharts := len(sheet.charts) > 0
+		hasComments := len(sheet.comments) > 0
+		needsSheetRels := hasCharts || hasComments
+
+		var sheetRels *packaging.Relationships
+		if needsSheetRels {
+			sheetRels = packaging.NewRelationships()
+		}
+
 		// Charts for this sheet
-		if len(sheet.charts) > 0 {
+		if hasCharts {
 			drawingIdx := i + 1
 
-			// Sheet relationships: link sheet -> drawing
-			sheetRels := packaging.NewRelationships()
 			sheetRels.Add(packaging.RelTypeDrawing, fmt.Sprintf("../drawings/drawing%d.xml", drawingIdx))
-			sheetRelsData, rErr := sheetRels.Marshal()
-			if rErr != nil {
-				return fmt.Errorf("marshal sheet rels: %w", rErr)
-			}
-			wb.pkg.AddFile(fmt.Sprintf("xl/worksheets/_rels/sheet%d.xml.rels", i+1), sheetRelsData)
 
 			// Drawing relationships: link drawing -> charts
 			drawingRels := packaging.NewRelationships()
@@ -76,6 +80,30 @@ func (wb *Workbook) build() error {
 			}
 			wb.pkg.AddFile(fmt.Sprintf("xl/drawings/drawing%d.xml", drawingIdx), drawingData)
 			ct.AddOverride(fmt.Sprintf("/xl/drawings/drawing%d.xml", drawingIdx), packaging.ContentTypeDrawing)
+		}
+
+		// Comments for this sheet
+		if hasComments {
+			commentIdx++
+			commentsXML := buildCommentsXML(sheet.comments)
+			wb.pkg.AddFile(fmt.Sprintf("xl/comments%d.xml", commentIdx), []byte(commentsXML))
+			ct.AddOverride(fmt.Sprintf("/xl/comments%d.xml", commentIdx), packaging.ContentTypeSpreadsheetComments)
+
+			// VML drawing for comment shapes
+			vmlXML := buildVMLDrawingXML(sheet.comments)
+			wb.pkg.AddFile(fmt.Sprintf("xl/drawings/vmlDrawing%d.vml", commentIdx), []byte(vmlXML))
+
+			sheetRels.Add(packaging.RelTypeComments, fmt.Sprintf("../comments%d.xml", commentIdx))
+			sheetRels.Add(packaging.RelTypeVMLDrawing, fmt.Sprintf("../drawings/vmlDrawing%d.vml", commentIdx))
+		}
+
+		// Write sheet rels if needed
+		if needsSheetRels {
+			sheetRelsData, rErr := sheetRels.Marshal()
+			if rErr != nil {
+				return fmt.Errorf("marshal sheet rels: %w", rErr)
+			}
+			wb.pkg.AddFile(fmt.Sprintf("xl/worksheets/_rels/sheet%d.xml.rels", i+1), sheetRelsData)
 		}
 	}
 
@@ -144,18 +172,57 @@ type xmlSheetRef struct {
 }
 
 func (wb *Workbook) buildWorkbookXML() ([]byte, error) {
-	xwb := xmlWorkbook{
-		Xmlns:  "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-		XmlnsR: "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-	}
+	var buf bytes.Buffer
+	buf.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	buf.WriteString(`<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`)
+
+	// Sheets
+	buf.WriteString(`<sheets>`)
 	for i, sheet := range wb.sheets {
-		xwb.Sheets.Sheet = append(xwb.Sheets.Sheet, xmlSheetRef{
-			Name:    sheet.name,
-			SheetID: strconv.Itoa(i + 1),
-			RID:     fmt.Sprintf("rId%d", i+1),
-		})
+		fmt.Fprintf(&buf, `<sheet name="%s" sheetId="%d" r:id="rId%d"/>`,
+			escapeXMLAttr(sheet.name), i+1, i+1)
 	}
-	return xmlutil.MarshalXML(xwb)
+	buf.WriteString(`</sheets>`)
+
+	// Defined names: named ranges + print areas + print titles
+	hasDefinedNames := len(wb.namedRanges) > 0
+	if !hasDefinedNames {
+		for _, sheet := range wb.sheets {
+			if sheet.printSettings != nil && (sheet.printSettings.printArea != nil || sheet.printSettings.repeatRows != "" || sheet.printSettings.repeatCols != "") {
+				hasDefinedNames = true
+				break
+			}
+		}
+	}
+
+	if hasDefinedNames {
+		buf.WriteString(`<definedNames>`)
+
+		// User-defined named ranges
+		for _, nr := range wb.namedRanges {
+			ref := fmt.Sprintf("'%s'!%s", nr.sheetName, nr.cellRange)
+			if nr.sheetID >= 0 {
+				fmt.Fprintf(&buf, `<definedName name="%s" localSheetId="%d">%s</definedName>`,
+					escapeXMLAttr(nr.name), nr.sheetID, escapeXMLText(ref))
+			} else {
+				fmt.Fprintf(&buf, `<definedName name="%s">%s</definedName>`,
+					escapeXMLAttr(nr.name), escapeXMLText(ref))
+			}
+		}
+
+		// Print areas and titles
+		for i, sheet := range wb.sheets {
+			if sheet.printSettings != nil {
+				buf.WriteString(buildPrintAreaDefinedName(sheet.name, i, sheet.printSettings.printArea))
+				buf.WriteString(buildPrintTitlesDefinedName(sheet.name, i, sheet.printSettings.repeatRows, sheet.printSettings.repeatCols))
+			}
+		}
+
+		buf.WriteString(`</definedNames>`)
+	}
+
+	buf.WriteString(`</workbook>`)
+	return buf.Bytes(), nil
 }
 
 // XML types for worksheets
@@ -252,9 +319,15 @@ type xmlCFDataBar struct {
 }
 
 func (wb *Workbook) buildSheetXML(sheet *Sheet) ([]byte, error) {
-	ws := xmlWorksheet{
-		Xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-	}
+	var buf bytes.Buffer
+	buf.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	buf.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
+
+	// Sheet views (freeze panes)
+	buf.WriteString(buildSheetViewsXML(sheet.freezePane))
+
+	// Sheet data
+	buf.WriteString(`<sheetData>`)
 
 	// Sort rows by index
 	rowIndices := make([]int, 0, len(sheet.rows))
@@ -265,7 +338,7 @@ func (wb *Workbook) buildSheetXML(sheet *Sheet) ([]byte, error) {
 
 	for _, rowIdx := range rowIndices {
 		row := sheet.rows[rowIdx]
-		xr := xmlRow{R: strconv.Itoa(rowIdx)}
+		fmt.Fprintf(&buf, `<row r="%d">`, rowIdx)
 
 		// Sort cells by column
 		colIndices := make([]int, 0, len(row.cells))
@@ -276,51 +349,67 @@ func (wb *Workbook) buildSheetXML(sheet *Sheet) ([]byte, error) {
 
 		for _, colIdx := range colIndices {
 			cell := row.cells[colIdx]
-			xc := xmlCell{R: CellRef(rowIdx, colIdx)}
+			ref := CellRef(rowIdx, colIdx)
 
 			switch cell.cellType {
 			case CellTypeString:
 				idx := wb.addSharedString(cell.strVal)
-				xc.T = "s"
-				xc.V = strconv.Itoa(idx)
+				fmt.Fprintf(&buf, `<c r="%s" t="s"><v>%d</v></c>`, ref, idx)
 			case CellTypeNumber:
-				xc.V = strconv.FormatFloat(cell.numVal, 'f', -1, 64)
+				fmt.Fprintf(&buf, `<c r="%s"><v>%s</v></c>`, ref, strconv.FormatFloat(cell.numVal, 'f', -1, 64))
 			case CellTypeBoolean:
-				xc.T = "b"
+				bv := "0"
 				if cell.boolVal {
-					xc.V = "1"
-				} else {
-					xc.V = "0"
+					bv = "1"
 				}
+				fmt.Fprintf(&buf, `<c r="%s" t="b"><v>%s</v></c>`, ref, bv)
 			case CellTypeFormula:
-				xc.F = cell.formula
+				fmt.Fprintf(&buf, `<c r="%s"><f>%s</f></c>`, ref, escapeXMLText(cell.formula))
+			default:
+				fmt.Fprintf(&buf, `<c r="%s"/>`, ref)
 			}
-
-			xr.Cells = append(xr.Cells, xc)
 		}
 
-		ws.SheetData.Rows = append(ws.SheetData.Rows, xr)
+		buf.WriteString(`</row>`)
 	}
+
+	buf.WriteString(`</sheetData>`)
+
+	// Sheet protection
+	buf.WriteString(buildProtectionXML(sheet.protection))
+
+	// Auto filter
+	buf.WriteString(buildAutoFilterXML(sheet.autoFilter))
 
 	// Merged cells
 	if len(sheet.mergedCells) > 0 {
-		mc := &xmlMergeCells{
-			Count: strconv.Itoa(len(sheet.mergedCells)),
-		}
+		fmt.Fprintf(&buf, `<mergeCells count="%d">`, len(sheet.mergedCells))
 		for _, m := range sheet.mergedCells {
-			mc.MergeCell = append(mc.MergeCell, xmlMergeCell{
-				Ref: fmt.Sprintf("%s:%s", CellRef(m.StartRow, m.StartCol), CellRef(m.EndRow, m.EndCol)),
-			})
+			fmt.Fprintf(&buf, `<mergeCell ref="%s:%s"/>`, CellRef(m.StartRow, m.StartCol), CellRef(m.EndRow, m.EndCol))
 		}
-		ws.MergeCells = mc
+		buf.WriteString(`</mergeCells>`)
 	}
 
 	// Conditional formatting
 	if len(sheet.conditionalFormats) > 0 {
-		ws.ConditionalFormatting = buildConditionalFormattingXML(sheet.conditionalFormats)
+		cfs := buildConditionalFormattingXML(sheet.conditionalFormats)
+		for _, cf := range cfs {
+			cfData, err := xmlutil.MarshalXMLFragment(cf)
+			if err != nil {
+				return nil, fmt.Errorf("marshal conditional formatting: %w", err)
+			}
+			buf.Write(cfData)
+		}
 	}
 
-	return xmlutil.MarshalXML(ws)
+	// Data validations
+	buf.WriteString(buildValidationsXML(sheet.validations))
+
+	// Page setup / print settings
+	buf.WriteString(buildPageSetupXML(sheet.printSettings))
+
+	buf.WriteString(`</worksheet>`)
+	return buf.Bytes(), nil
 }
 
 // buildConditionalFormattingXML converts conditional formats to XML structs
@@ -595,6 +684,15 @@ func (wb *Workbook) buildChartXML(chart *Chart, chartIndex int) ([]byte, error) 
 	case ChartTypeColumn:
 		chartTypeTag = "c:barChart"
 		grouping = "clustered"
+	case ChartTypeDonut:
+		chartTypeTag = "c:doughnutChart"
+		grouping = ""
+	case ChartTypeRadar:
+		chartTypeTag = "c:radarChart"
+		grouping = ""
+	case ChartTypeBarStacked:
+		chartTypeTag = "c:barChart"
+		grouping = "stacked"
 	}
 
 	var buf bytes.Buffer

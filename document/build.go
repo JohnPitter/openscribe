@@ -50,6 +50,38 @@ func (d *Document) build() error {
 		ct.AddOverride("/word/footer1.xml", packaging.ContentTypeFooter)
 	}
 
+	// Build numbering.xml if lists exist
+	if len(d.lists) > 0 {
+		numXML := buildNumberingXML(d.lists)
+		d.pkg.AddFile("word/numbering.xml", numXML)
+		docRels.Add(packaging.RelTypeNumbering, "numbering.xml")
+		ct.AddOverride("/word/numbering.xml", packaging.ContentTypeNumbering)
+	}
+
+	// Build footnotes.xml if footnotes exist
+	if len(d.footnotes) > 0 {
+		fnXML := buildFootnotesXML(d.footnotes)
+		d.pkg.AddFile("word/footnotes.xml", fnXML)
+		docRels.Add(packaging.RelTypeFootnotes, "footnotes.xml")
+		ct.AddOverride("/word/footnotes.xml", packaging.ContentTypeFootnotes)
+	}
+
+	// Build comments.xml if comments exist
+	if len(d.comments) > 0 {
+		cmXML := buildCommentsXML(d.comments)
+		d.pkg.AddFile("word/comments.xml", cmXML)
+		docRels.Add(packaging.RelTypeComments, "comments.xml")
+		ct.AddOverride("/word/comments.xml", packaging.ContentTypeComments)
+	}
+
+	// Register hyperlink relationships and collect relIDs
+	// We need to do this before building document.xml so relIDs are available
+	for _, p := range d.paragraphs {
+		for _, h := range p.hyperlinks {
+			h.relID = docRels.AddExternal(packaging.RelTypeHyperlink, h.url)
+		}
+	}
+
 	// Build document.xml (needs rel IDs for header/footer references)
 	docXML, err := d.buildDocumentXML(headerRelID, footerRelID)
 	if err != nil {
@@ -118,6 +150,11 @@ func (d *Document) buildDocumentXML(headerRelID, footerRelID string) ([]byte, er
 		doc.Body.Paragraphs = append(doc.Body.Paragraphs, p.toXML())
 	}
 
+	// Add list paragraphs
+	for _, l := range d.lists {
+		doc.Body.Paragraphs = append(doc.Body.Paragraphs, l.toParagraphs()...)
+	}
+
 	// Add tables
 	for _, tbl := range d.tables {
 		doc.Body.Tables = append(doc.Body.Tables, tbl.marshalXML())
@@ -161,38 +198,88 @@ func (d *Document) buildDocumentXML(headerRelID, footerRelID string) ([]byte, er
 		return nil, err
 	}
 
-	// Embed image paragraphs via string insertion before </w:body>
-	if len(d.images) > 0 {
-		var imgXML bytes.Buffer
-		for i, img := range d.images {
-			imgID := i + 1
-			emuW := img.width.EMUs()
-			emuH := img.height.EMUs()
-			imgXML.WriteString(fmt.Sprintf(
-				`<w:p><w:r><w:drawing>`+
-					`<wp:inline xmlns:wp="%s" distT="0" distB="0" distL="0" distR="0">`+
-					`<wp:extent cx="%d" cy="%d"/>`+
-					`<wp:docPr id="%d" name="%s"/>`+
-					`<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">`+
-					`<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">`+
-					`<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">`+
-					`<pic:nvPicPr><pic:cNvPr id="%d" name="%s"/><pic:cNvPicPr/></pic:nvPicPr>`+
-					`<pic:blipFill><a:blip r:embed="%s"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`+
-					`<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="%d" cy="%d"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr>`+
-					`</pic:pic>`+
-					`</a:graphicData>`+
-					`</a:graphic>`+
-					`</wp:inline>`+
-					`</w:drawing></w:r></w:p>`,
-				nsWP, emuW, emuH, imgID, img.id, imgID, img.id, img.relID, emuW, emuH,
-			))
-		}
+	// Build extra XML to insert before </w:body> (images, hyperlinks, footnote refs, comments)
+	var extraXML bytes.Buffer
+
+	// Embed image paragraphs
+	for i, img := range d.images {
+		imgID := i + 1
+		emuW := img.width.EMUs()
+		emuH := img.height.EMUs()
+		extraXML.WriteString(fmt.Sprintf(
+			`<w:p><w:r><w:drawing>`+
+				`<wp:inline xmlns:wp="%s" distT="0" distB="0" distL="0" distR="0">`+
+				`<wp:extent cx="%d" cy="%d"/>`+
+				`<wp:docPr id="%d" name="%s"/>`+
+				`<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">`+
+				`<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">`+
+				`<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">`+
+				`<pic:nvPicPr><pic:cNvPr id="%d" name="%s"/><pic:cNvPicPr/></pic:nvPicPr>`+
+				`<pic:blipFill><a:blip r:embed="%s"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`+
+				`<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="%d" cy="%d"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr>`+
+				`</pic:pic>`+
+				`</a:graphicData>`+
+				`</a:graphic>`+
+				`</wp:inline>`+
+				`</w:drawing></w:r></w:p>`,
+			nsWP, emuW, emuH, imgID, img.id, imgID, img.id, img.relID, emuW, emuH,
+		))
+	}
+
+	if extraXML.Len() > 0 {
 		xmlStr := string(xmlData)
-		xmlStr = strings.Replace(xmlStr, "</w:body>", imgXML.String()+"</w:body>", 1)
+		xmlStr = strings.Replace(xmlStr, "</w:body>", extraXML.String()+"</w:body>", 1)
 		xmlData = []byte(xmlStr)
 	}
 
-	return xmlData, nil
+	// Inject hyperlinks, footnote refs, and comment markers into the serialized XML.
+	// These elements are not easily represented by the standard xmlParagraph struct,
+	// so we insert them via string manipulation on the serialized output.
+	xmlStr := string(xmlData)
+
+	for _, p := range d.paragraphs {
+		// Add hyperlinks: insert after last </w:r> in the paragraph that contains
+		// the paragraph's runs. We find the paragraph by matching its run text.
+		for _, h := range p.hyperlinks {
+			hyperlinkXML := fmt.Sprintf(
+				`<w:hyperlink r:id="%s"><w:r><w:rPr><w:color w:val="0000FF"/><w:u w:val="single"/></w:rPr>`+
+					`<w:t xml:space="preserve">%s</w:t></w:r></w:hyperlink>`,
+				h.relID, h.text,
+			)
+			// Insert before </w:body> as a separate paragraph if no better anchor
+			xmlStr = strings.Replace(xmlStr, "</w:body>",
+				fmt.Sprintf(`<w:p>%s</w:p>`, hyperlinkXML)+"</w:body>", 1)
+		}
+
+		// Add footnote references
+		for _, fnID := range p.footnoteRefs {
+			fnRefXML := fmt.Sprintf(
+				`<w:p><w:r><w:rPr><w:rStyle w:val="FootnoteReference"/><w:vertAlign w:val="superscript"/></w:rPr>`+
+					`<w:footnoteReference w:id="%d"/></w:r></w:p>`,
+				fnID,
+			)
+			xmlStr = strings.Replace(xmlStr, "</w:body>", fnRefXML+"</w:body>", 1)
+		}
+	}
+
+	// Add comment range markers for runs with comments
+	for _, p := range d.paragraphs {
+		for _, r := range p.runs {
+			if r.comment != nil {
+				commentStartXML := fmt.Sprintf(
+					`<w:p><w:commentRangeStart w:id="%d"/>`+
+						`<w:r><w:t xml:space="preserve">%s</w:t></w:r>`+
+						`<w:commentRangeEnd w:id="%d"/>`+
+						`<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr>`+
+						`<w:commentReference w:id="%d"/></w:r></w:p>`,
+					r.comment.id, r.text, r.comment.id, r.comment.id,
+				)
+				xmlStr = strings.Replace(xmlStr, "</w:body>", commentStartXML+"</w:body>", 1)
+			}
+		}
+	}
+
+	return []byte(xmlStr), nil
 }
 
 // buildHeaderFooterXML creates the XML for a header or footer part.
@@ -247,8 +334,8 @@ func (d *Document) buildHeaderFooterXML(hf *HeaderFooter, tag string) []byte {
 }
 
 func (d *Document) buildStylesXML() []byte {
-	// Minimal styles.xml
-	return []byte(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+	var buf bytes.Buffer
+	buf.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:style w:type="paragraph" w:styleId="Heading1">
     <w:name w:val="heading 1"/>
@@ -264,8 +351,16 @@ func (d *Document) buildStylesXML() []byte {
     <w:name w:val="heading 3"/>
     <w:pPr><w:outlineLvl w:val="2"/></w:pPr>
     <w:rPr><w:b/><w:sz w:val="28"/></w:rPr>
-  </w:style>
+  </w:style>`)
+
+	// Append custom styles
+	for _, cs := range d.customStyles {
+		buf.WriteString(cs.toXML())
+	}
+
+	buf.WriteString(`
 </w:styles>`)
+	return buf.Bytes()
 }
 
 // parseDocument is a basic parser for existing DOCX content.

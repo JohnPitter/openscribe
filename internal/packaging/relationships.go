@@ -24,6 +24,10 @@ const (
 	RelTypeChart          = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart"
 	RelTypeHeader         = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
 	RelTypeFooter         = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
+	RelTypeNumbering      = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering"
+	RelTypeFootnotes      = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
+	RelTypeComments       = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+	RelTypeVMLDrawing     = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing"
 )
 
 // Relationships represents the _rels/.rels file
@@ -56,6 +60,18 @@ func (r *Relationships) Add(relType, target string) string {
 		ID:     id,
 		Type:   relType,
 		Target: target,
+	})
+	return id
+}
+
+// AddExternal adds an external relationship (e.g., hyperlink) and returns its ID
+func (r *Relationships) AddExternal(relType, target string) string {
+	id := fmt.Sprintf("rId%d", len(r.Relationships)+1)
+	r.Relationships = append(r.Relationships, Relationship{
+		ID:         id,
+		Type:       relType,
+		Target:     target,
+		TargetMode: "External",
 	})
 	return id
 }

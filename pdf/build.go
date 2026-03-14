@@ -2,8 +2,11 @@ package pdf
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
 	"math"
+	"strings"
+	"time"
 
 	"github.com/JohnPitter/openscribe/common"
 )
@@ -37,6 +40,23 @@ func (w *pdfWriter) allocObj() int {
 	return id
 }
 
+// imageRef tracks an image XObject for a page
+type imageRef struct {
+	objID   int
+	imgName string
+	elem    *ImageElement
+}
+
+// formFieldRef tracks a form field widget
+type formFieldRef struct {
+	objID int
+}
+
+// annotRef tracks an annotation object
+type annotRef struct {
+	objID int
+}
+
 func (d *Document) build() ([]byte, error) {
 	w := newPDFWriter()
 
@@ -59,6 +79,58 @@ func (d *Document) build() ([]byte, error) {
 		pids = append(pids, pid)
 	}
 
+	// Scan for images, form fields, and annotations to pre-allocate object IDs
+	type pageExtras struct {
+		images     []imageRef
+		formFields []formFieldRef
+		annots     []annotRef
+	}
+	pageExtrasMap := make([]pageExtras, len(d.pages))
+	var allFormFieldObjIDs []int
+
+	for i, page := range d.pages {
+		imgIndex := 0
+		for _, elem := range page.elements {
+			switch e := elem.(type) {
+			case *ImageElement:
+				if e.data != nil && len(e.data.Data) > 0 {
+					objID := w.allocObj()
+					imgName := fmt.Sprintf("Im%d", imgIndex)
+					imgIndex++
+					pageExtrasMap[i].images = append(pageExtrasMap[i].images, imageRef{
+						objID:   objID,
+						imgName: imgName,
+						elem:    e,
+					})
+				}
+			case *TextField:
+				objID := w.allocObj()
+				pageExtrasMap[i].formFields = append(pageExtrasMap[i].formFields, formFieldRef{objID: objID})
+				allFormFieldObjIDs = append(allFormFieldObjIDs, objID)
+			case *Checkbox:
+				objID := w.allocObj()
+				pageExtrasMap[i].formFields = append(pageExtrasMap[i].formFields, formFieldRef{objID: objID})
+				allFormFieldObjIDs = append(allFormFieldObjIDs, objID)
+			case *Dropdown:
+				objID := w.allocObj()
+				pageExtrasMap[i].formFields = append(pageExtrasMap[i].formFields, formFieldRef{objID: objID})
+				allFormFieldObjIDs = append(allFormFieldObjIDs, objID)
+			case *Annotation:
+				objID := w.allocObj()
+				pageExtrasMap[i].annots = append(pageExtrasMap[i].annots, annotRef{objID: objID})
+			}
+		}
+	}
+
+	// Allocate AcroForm object ID if there are form fields
+	var acroFormID int
+	if len(allFormFieldObjIDs) > 0 {
+		acroFormID = w.allocObj()
+	}
+
+	// Allocate Info dictionary object ID
+	infoID := w.allocObj()
+
 	// Write header
 	w.buf.WriteString("%PDF-1.4\n")
 	w.buf.WriteString("%\xe2\xe3\xcf\xd3\n\n")
@@ -71,6 +143,7 @@ func (d *Document) build() ([]byte, error) {
 	// Page objects and content streams
 	for i, page := range d.pages {
 		pid := pids[i]
+		extras := pageExtrasMap[i]
 
 		// Build content stream
 		var content bytes.Buffer
@@ -86,6 +159,7 @@ func (d *Document) build() ([]byte, error) {
 				page.size.Width.Points(), pageH)
 		}
 
+		imgIdx := 0
 		for _, elem := range page.elements {
 			switch e := elem.(type) {
 			case *TextElement:
@@ -134,13 +208,31 @@ func (d *Document) build() ([]byte, error) {
 				buildChartPDF(&content, e, pageH)
 
 			case *ImageElement:
-				// Image rendering placeholder — images require XObject streams
-				// which need object-level support; draw a placeholder rectangle
-				y := pageH - e.y - e.height
-				fmt.Fprintf(&content, "0.9 0.9 0.9 rg\n")
-				fmt.Fprintf(&content, "%.2f %.2f %.2f %.2f re f\n", e.x, y, e.width, e.height)
-				fmt.Fprintf(&content, "0.5 0.5 0.5 RG\n0.5 w\n")
-				fmt.Fprintf(&content, "%.2f %.2f %.2f %.2f re S\n", e.x, y, e.width, e.height)
+				if e.data != nil && len(e.data.Data) > 0 && imgIdx < len(extras.images) {
+					ref := extras.images[imgIdx]
+					imgIdx++
+					// Place image using cm (concat matrix) operator
+					y := pageH - e.y - e.height
+					fmt.Fprintf(&content, "q\n")
+					fmt.Fprintf(&content, "%.2f 0 0 %.2f %.2f %.2f cm\n",
+						e.width, e.height, e.x, y)
+					fmt.Fprintf(&content, "/%s Do\n", ref.imgName)
+					fmt.Fprintf(&content, "Q\n")
+				} else {
+					// Placeholder rectangle for images without data
+					y := pageH - e.y - e.height
+					fmt.Fprintf(&content, "0.9 0.9 0.9 rg\n")
+					fmt.Fprintf(&content, "%.2f %.2f %.2f %.2f re f\n", e.x, y, e.width, e.height)
+					fmt.Fprintf(&content, "0.5 0.5 0.5 RG\n0.5 w\n")
+					fmt.Fprintf(&content, "%.2f %.2f %.2f %.2f re S\n", e.x, y, e.width, e.height)
+				}
+
+			case *TextBlock:
+				buildTextBlockPDF(&content, e, pageH)
+
+			// Form fields and annotations are handled as separate objects, not in content stream
+			case *TextField, *Checkbox, *Dropdown, *Annotation:
+				// These are serialized as annotation dictionaries, not in the content stream
 			}
 		}
 
@@ -154,15 +246,93 @@ func (d *Document) build() ([]byte, error) {
 		w.buf.WriteString("\nendstream\n")
 		w.endObject()
 
+		// Write image XObject streams
+		for _, ref := range extras.images {
+			writeImageXObject(w, ref)
+		}
+
+		// Write form field widget annotations
+		ffIdx := 0
+		for _, elem := range page.elements {
+			switch e := elem.(type) {
+			case *TextField:
+				if ffIdx < len(extras.formFields) {
+					writeTextFieldWidget(w, extras.formFields[ffIdx].objID, pid.pageID, fontID, e, pageH)
+					ffIdx++
+				}
+			case *Checkbox:
+				if ffIdx < len(extras.formFields) {
+					writeCheckboxWidget(w, extras.formFields[ffIdx].objID, pid.pageID, e, pageH)
+					ffIdx++
+				}
+			case *Dropdown:
+				if ffIdx < len(extras.formFields) {
+					writeDropdownWidget(w, extras.formFields[ffIdx].objID, pid.pageID, fontID, e, pageH)
+					ffIdx++
+				}
+			}
+		}
+
+		// Write annotation objects
+		annotIdx := 0
+		for _, elem := range page.elements {
+			if a, ok := elem.(*Annotation); ok {
+				if annotIdx < len(extras.annots) {
+					writeAnnotation(w, extras.annots[annotIdx].objID, pid.pageID, a, pageH, fontID)
+					annotIdx++
+				}
+			}
+		}
+
+		// Build XObject references for resources
+		var xobjEntries []string
+		for _, ref := range extras.images {
+			xobjEntries = append(xobjEntries, fmt.Sprintf("/%s %d 0 R", ref.imgName, ref.objID))
+		}
+
+		// Collect annotation/widget references for the /Annots array
+		var annotRefs []int
+		for _, ff := range extras.formFields {
+			annotRefs = append(annotRefs, ff.objID)
+		}
+		for _, an := range extras.annots {
+			annotRefs = append(annotRefs, an.objID)
+		}
+
 		// Page object
 		w.startObject(pid.pageID)
-		fmt.Fprintf(&w.buf, "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %.2f %.2f] /Contents %d 0 R /Resources << /Font << /F1 %d 0 R >> >> >>\n",
+		var pageBuf bytes.Buffer
+		fmt.Fprintf(&pageBuf, "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %.2f %.2f] /Contents %d 0 R",
 			pagesID,
 			page.size.Width.Points(),
 			page.size.Height.Points(),
 			pid.contentID,
-			fontID,
 		)
+
+		// Resources
+		pageBuf.WriteString(" /Resources << /Font << /F1 ")
+		fmt.Fprintf(&pageBuf, "%d 0 R >>", fontID)
+		if len(xobjEntries) > 0 {
+			pageBuf.WriteString(" /XObject << ")
+			pageBuf.WriteString(strings.Join(xobjEntries, " "))
+			pageBuf.WriteString(" >>")
+		}
+		pageBuf.WriteString(" >>")
+
+		// Annotations array
+		if len(annotRefs) > 0 {
+			pageBuf.WriteString(" /Annots [")
+			for j, ref := range annotRefs {
+				if j > 0 {
+					pageBuf.WriteString(" ")
+				}
+				fmt.Fprintf(&pageBuf, "%d 0 R", ref)
+			}
+			pageBuf.WriteString("]")
+		}
+
+		pageBuf.WriteString(" >>\n")
+		w.buf.Write(pageBuf.Bytes())
 		w.endObject()
 	}
 
@@ -178,9 +348,48 @@ func (d *Document) build() ([]byte, error) {
 	fmt.Fprintf(&w.buf, "] /Count %d >>\n", len(d.pages))
 	w.endObject()
 
+	// AcroForm object (if form fields exist)
+	if acroFormID > 0 {
+		w.startObject(acroFormID)
+		fmt.Fprintf(&w.buf, "<< /Fields [")
+		for i, fid := range allFormFieldObjIDs {
+			if i > 0 {
+				w.buf.WriteString(" ")
+			}
+			fmt.Fprintf(&w.buf, "%d 0 R", fid)
+		}
+		fmt.Fprintf(&w.buf, "] /DR << /Font << /F1 %d 0 R >> >> /NeedAppearances true >>\n", fontID)
+		w.endObject()
+	}
+
+	// Info dictionary
+	w.startObject(infoID)
+	now := time.Now().UTC()
+	dateStr := fmt.Sprintf("D:%04d%02d%02d%02d%02d%02dZ",
+		now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
+	fmt.Fprintf(&w.buf, "<< /Producer (OpenScribe PDF Library)")
+	if d.metadata.Title != "" {
+		fmt.Fprintf(&w.buf, " /Title (%s)", escapePDF(d.metadata.Title))
+	}
+	if d.metadata.Author != "" {
+		fmt.Fprintf(&w.buf, " /Author (%s)", escapePDF(d.metadata.Author))
+	}
+	if d.metadata.Subject != "" {
+		fmt.Fprintf(&w.buf, " /Subject (%s)", escapePDF(d.metadata.Subject))
+	}
+	if d.metadata.Creator != "" {
+		fmt.Fprintf(&w.buf, " /Creator (%s)", escapePDF(d.metadata.Creator))
+	}
+	fmt.Fprintf(&w.buf, " /CreationDate (%s) /ModDate (%s) >>\n", dateStr, dateStr)
+	w.endObject()
+
 	// Catalog object
 	w.startObject(catalogID)
-	fmt.Fprintf(&w.buf, "<< /Type /Catalog /Pages %d 0 R >>\n", pagesID)
+	if acroFormID > 0 {
+		fmt.Fprintf(&w.buf, "<< /Type /Catalog /Pages %d 0 R /AcroForm %d 0 R >>\n", pagesID, acroFormID)
+	} else {
+		fmt.Fprintf(&w.buf, "<< /Type /Catalog /Pages %d 0 R >>\n", pagesID)
+	}
 	w.endObject()
 
 	// Cross-reference table
@@ -192,12 +401,314 @@ func (d *Document) build() ([]byte, error) {
 		fmt.Fprintf(&w.buf, "%010d 00000 n \n", offset)
 	}
 
-	// Trailer
+	// Trailer with Info reference
 	fmt.Fprintf(&w.buf, "trailer\n")
-	fmt.Fprintf(&w.buf, "<< /Size %d /Root %d 0 R >>\n", w.nextObj, catalogID)
+	fmt.Fprintf(&w.buf, "<< /Size %d /Root %d 0 R /Info %d 0 R >>\n", w.nextObj, catalogID, infoID)
 	fmt.Fprintf(&w.buf, "startxref\n%d\n%%%%EOF\n", xrefOffset)
 
 	return w.buf.Bytes(), nil
+}
+
+// writeImageXObject writes an image as a PDF XObject stream
+func writeImageXObject(w *pdfWriter, ref imageRef) {
+	e := ref.elem
+	imgData := e.data
+
+	w.startObject(ref.objID)
+
+	// Determine pixel dimensions from ImageData or use element dimensions
+	pixW := int(imgData.Width.Points())
+	pixH := int(imgData.Height.Points())
+	if pixW <= 0 {
+		pixW = int(e.width)
+	}
+	if pixH <= 0 {
+		pixH = int(e.height)
+	}
+	if pixW <= 0 {
+		pixW = 1
+	}
+	if pixH <= 0 {
+		pixH = 1
+	}
+
+	switch imgData.Format {
+	case common.ImageFormatJPEG:
+		// Embed raw JPEG data with DCTDecode
+		fmt.Fprintf(&w.buf, "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length %d >>\n",
+			pixW, pixH, len(imgData.Data))
+		w.buf.WriteString("stream\n")
+		w.buf.Write(imgData.Data)
+		w.buf.WriteString("\nendstream\n")
+
+	case common.ImageFormatPNG:
+		// Compress with zlib (FlateDecode)
+		var compressed bytes.Buffer
+		zw := zlib.NewWriter(&compressed)
+		zw.Write(imgData.Data)
+		zw.Close()
+
+		fmt.Fprintf(&w.buf, "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length %d >>\n",
+			pixW, pixH, compressed.Len())
+		w.buf.WriteString("stream\n")
+		w.buf.Write(compressed.Bytes())
+		w.buf.WriteString("\nendstream\n")
+
+	default:
+		// Fallback: embed raw data
+		fmt.Fprintf(&w.buf, "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length %d >>\n",
+			pixW, pixH, len(imgData.Data))
+		w.buf.WriteString("stream\n")
+		w.buf.Write(imgData.Data)
+		w.buf.WriteString("\nendstream\n")
+	}
+
+	w.endObject()
+}
+
+// writeTextFieldWidget writes a text field widget annotation
+func writeTextFieldWidget(w *pdfWriter, objID, pageID, fontID int, tf *TextField, pageH float64) {
+	y := pageH - tf.y - tf.height
+	w.startObject(objID)
+
+	flags := 0
+	if tf.readOnly {
+		flags |= 1 // Bit 1: ReadOnly
+	}
+	if tf.required {
+		flags |= 2 // Bit 2: Required
+	}
+
+	ffFlags := 0
+	if tf.multiline {
+		ffFlags |= 1 << 12 // Bit 13: Multiline
+	}
+
+	fmt.Fprintf(&w.buf, "<< /Type /Annot /Subtype /Widget /FT /Tx /T (%s) /Rect [%.2f %.2f %.2f %.2f] /P %d 0 R /Ff %d",
+		escapePDF(tf.name), tf.x, y, tf.x+tf.width, y+tf.height, pageID, flags|ffFlags)
+
+	if tf.value != "" {
+		fmt.Fprintf(&w.buf, " /V (%s)", escapePDF(tf.value))
+	}
+	if tf.maxLength > 0 {
+		fmt.Fprintf(&w.buf, " /MaxLen %d", tf.maxLength)
+	}
+
+	// Default appearance
+	fmt.Fprintf(&w.buf, " /DA (/F1 12 Tf 0 0 0 rg)")
+
+	// Border style
+	fmt.Fprintf(&w.buf, " /BS << /W 1 /S /S >>")
+	fmt.Fprintf(&w.buf, " /MK << /BC [0 0 0] >>")
+
+	fmt.Fprintf(&w.buf, " >>\n")
+	w.endObject()
+}
+
+// writeCheckboxWidget writes a checkbox widget annotation
+func writeCheckboxWidget(w *pdfWriter, objID, pageID int, cb *Checkbox, pageH float64) {
+	y := pageH - cb.y - cb.height
+	w.startObject(objID)
+
+	flags := 0
+	if cb.readOnly {
+		flags |= 1
+	}
+	if cb.required {
+		flags |= 2
+	}
+
+	onValue := "Yes"
+	currentVal := "Off"
+	if cb.checked {
+		currentVal = onValue
+	}
+
+	fmt.Fprintf(&w.buf, "<< /Type /Annot /Subtype /Widget /FT /Btn /T (%s) /Rect [%.2f %.2f %.2f %.2f] /P %d 0 R /Ff %d /V /%s /AS /%s",
+		escapePDF(cb.name), cb.x, y, cb.x+cb.width, y+cb.height, pageID, flags, currentVal, currentVal)
+
+	// Appearance with checkmark
+	fmt.Fprintf(&w.buf, " /MK << /CA (4) >>") // 4 = checkmark in ZapfDingbats
+	fmt.Fprintf(&w.buf, " /BS << /W 1 /S /S >>")
+
+	fmt.Fprintf(&w.buf, " >>\n")
+	w.endObject()
+}
+
+// writeDropdownWidget writes a dropdown/choice widget annotation
+func writeDropdownWidget(w *pdfWriter, objID, pageID, fontID int, dd *Dropdown, pageH float64) {
+	y := pageH - dd.y - dd.height
+	w.startObject(objID)
+
+	flags := 0
+	if dd.readOnly {
+		flags |= 1
+	}
+	if dd.required {
+		flags |= 2
+	}
+
+	// Choice field with combo flag (bit 18)
+	ffFlags := 1 << 17 // Combo box
+
+	fmt.Fprintf(&w.buf, "<< /Type /Annot /Subtype /Widget /FT /Ch /T (%s) /Rect [%.2f %.2f %.2f %.2f] /P %d 0 R /Ff %d",
+		escapePDF(dd.name), dd.x, y, dd.x+dd.width, y+dd.height, pageID, flags|ffFlags)
+
+	// Options
+	if len(dd.options) > 0 {
+		w.buf.WriteString(" /Opt [")
+		for j, opt := range dd.options {
+			if j > 0 {
+				w.buf.WriteString(" ")
+			}
+			fmt.Fprintf(&w.buf, "(%s)", escapePDF(opt))
+		}
+		w.buf.WriteString("]")
+	}
+
+	if dd.value != "" {
+		fmt.Fprintf(&w.buf, " /V (%s)", escapePDF(dd.value))
+	}
+
+	// Default appearance
+	fmt.Fprintf(&w.buf, " /DA (/F1 12 Tf 0 0 0 rg)")
+	fmt.Fprintf(&w.buf, " /BS << /W 1 /S /S >>")
+	fmt.Fprintf(&w.buf, " /MK << /BC [0 0 0] >>")
+
+	fmt.Fprintf(&w.buf, " >>\n")
+	w.endObject()
+}
+
+// writeAnnotation writes a PDF annotation object
+func writeAnnotation(w *pdfWriter, objID, pageID int, a *Annotation, pageH float64, fontID int) {
+	// Convert y coordinates to PDF coordinate space
+	py1 := pageH - a.y2
+	py2 := pageH - a.y1
+
+	w.startObject(objID)
+
+	r := float64(a.color.R) / 255
+	g := float64(a.color.G) / 255
+	b := float64(a.color.B) / 255
+
+	switch a.annotType {
+	case AnnotHighlight:
+		fmt.Fprintf(&w.buf, "<< /Type /Annot /Subtype /Highlight /Rect [%.2f %.2f %.2f %.2f] /C [%.3f %.3f %.3f] /P %d 0 R",
+			a.x1, py1, a.x2, py2, r, g, b, pageID)
+		// QuadPoints for highlight area
+		fmt.Fprintf(&w.buf, " /QuadPoints [%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f]",
+			a.x1, py2, a.x2, py2, a.x1, py1, a.x2, py1)
+
+	case AnnotUnderline:
+		fmt.Fprintf(&w.buf, "<< /Type /Annot /Subtype /Underline /Rect [%.2f %.2f %.2f %.2f] /C [%.3f %.3f %.3f] /P %d 0 R",
+			a.x1, py1, a.x2, py2, r, g, b, pageID)
+		fmt.Fprintf(&w.buf, " /QuadPoints [%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f]",
+			a.x1, py2, a.x2, py2, a.x1, py1, a.x2, py1)
+
+	case AnnotStrikeout:
+		fmt.Fprintf(&w.buf, "<< /Type /Annot /Subtype /StrikeOut /Rect [%.2f %.2f %.2f %.2f] /C [%.3f %.3f %.3f] /P %d 0 R",
+			a.x1, py1, a.x2, py2, r, g, b, pageID)
+		fmt.Fprintf(&w.buf, " /QuadPoints [%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f]",
+			a.x1, py2, a.x2, py2, a.x1, py1, a.x2, py1)
+
+	case AnnotStickyNote:
+		fmt.Fprintf(&w.buf, "<< /Type /Annot /Subtype /Text /Rect [%.2f %.2f %.2f %.2f] /C [%.3f %.3f %.3f] /P %d 0 R /Open false",
+			a.x1, py1, a.x2, py2, r, g, b, pageID)
+		if a.text != "" {
+			fmt.Fprintf(&w.buf, " /Contents (%s)", escapePDF(a.text))
+		}
+
+	case AnnotFreeText:
+		fmt.Fprintf(&w.buf, "<< /Type /Annot /Subtype /FreeText /Rect [%.2f %.2f %.2f %.2f] /C [%.3f %.3f %.3f] /P %d 0 R",
+			a.x1, py1, a.x2, py2, r, g, b, pageID)
+		if a.text != "" {
+			fmt.Fprintf(&w.buf, " /Contents (%s)", escapePDF(a.text))
+		}
+		fmt.Fprintf(&w.buf, " /DA (/F1 %.1f Tf %.3f %.3f %.3f rg)", a.font.Size, r, g, b)
+	}
+
+	if a.author != "" {
+		fmt.Fprintf(&w.buf, " /T (%s)", escapePDF(a.author))
+	}
+	if a.subject != "" {
+		fmt.Fprintf(&w.buf, " /Subj (%s)", escapePDF(a.subject))
+	}
+
+	fmt.Fprintf(&w.buf, " >>\n")
+	w.endObject()
+}
+
+// buildTextBlockPDF renders a TextBlock to the content stream
+func buildTextBlockPDF(content *bytes.Buffer, tb *TextBlock, pageH float64) {
+	lines := tb.WrapLines()
+	if len(lines) == 0 {
+		return
+	}
+
+	fontSize := tb.font.Size
+	lineHeight := fontSize * tb.lineSpacing
+	colWidth := tb.columnWidth()
+
+	r := float64(tb.font.Color.R) / 255
+	g := float64(tb.font.Color.G) / 255
+	b := float64(tb.font.Color.B) / 255
+
+	if tb.columns <= 1 {
+		// Single column
+		for i, line := range lines {
+			y := pageH - tb.y - float64(i)*lineHeight
+			x := tb.x
+
+			x = alignLineX(line, x, colWidth, fontSize, tb.alignment)
+
+			fmt.Fprintf(content, "BT\n")
+			fmt.Fprintf(content, "/F1 %.1f Tf\n", fontSize)
+			fmt.Fprintf(content, "%.3f %.3f %.3f rg\n", r, g, b)
+			fmt.Fprintf(content, "%.2f %.2f Td\n", x, y)
+			fmt.Fprintf(content, "(%s) Tj\n", escapePDF(line))
+			fmt.Fprintf(content, "ET\n")
+		}
+	} else {
+		// Multi-column layout: distribute lines across columns
+		linesPerCol := (len(lines) + tb.columns - 1) / tb.columns
+
+		for col := 0; col < tb.columns; col++ {
+			colX := tb.x + float64(col)*(colWidth+tb.columnGap)
+			startLine := col * linesPerCol
+			endLine := startLine + linesPerCol
+			if endLine > len(lines) {
+				endLine = len(lines)
+			}
+
+			for i := startLine; i < endLine; i++ {
+				line := lines[i]
+				lineIdx := i - startLine
+				y := pageH - tb.y - float64(lineIdx)*lineHeight
+				x := alignLineX(line, colX, colWidth, fontSize, tb.alignment)
+
+				fmt.Fprintf(content, "BT\n")
+				fmt.Fprintf(content, "/F1 %.1f Tf\n", fontSize)
+				fmt.Fprintf(content, "%.3f %.3f %.3f rg\n", r, g, b)
+				fmt.Fprintf(content, "%.2f %.2f Td\n", x, y)
+				fmt.Fprintf(content, "(%s) Tj\n", escapePDF(line))
+				fmt.Fprintf(content, "ET\n")
+			}
+		}
+	}
+}
+
+// alignLineX calculates the x offset for a line based on alignment
+func alignLineX(line string, baseX, colWidth, fontSize float64, alignment common.TextAlignment) float64 {
+	switch alignment {
+	case common.TextAlignCenter:
+		lineW := measureStringWidth(line, fontSize)
+		return baseX + (colWidth-lineW)/2
+	case common.TextAlignRight:
+		lineW := measureStringWidth(line, fontSize)
+		return baseX + colWidth - lineW
+	default:
+		return baseX
+	}
 }
 
 func buildTablePDF(content *bytes.Buffer, t *TableElement, pageH float64) {
@@ -672,15 +1183,15 @@ func buildPieChart(content *bytes.Buffer, c *ChartElement, plotX, plotY, plotW, 
 			color := sliceColors[i%len(sliceColors)]
 			setFillColor(content, color)
 			fmt.Fprintf(content, "%.2f %.2f 8 8 re f\n", lx, ly)
-			pct := fmt.Sprintf("%s (%.0f%%)", escapePDF(c.categories[i]), v(values[i], total))
+			pct := fmt.Sprintf("%s (%.0f%%)", escapePDF(c.categories[i]), pctVal(values[i], total))
 			fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
 				lx+12, ly+1, pct)
 		}
 	}
 }
 
-// v calculates percentage
-func v(val, total float64) float64 {
+// pctVal calculates percentage
+func pctVal(val, total float64) float64 {
 	return val / total * 100
 }
 

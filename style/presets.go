@@ -139,12 +139,31 @@ func LuxuryWarm() Theme {
 // AllThemes returns all pre-built themes
 func AllThemes() []Theme {
 	return []Theme{
+		// Original themes
 		BasicClean(),
 		ProfessionalCorporate(),
 		PremiumModern(),
 		PremiumElegant(),
 		LuxuryAgency(),
 		LuxuryWarm(),
+		// Industry-specific themes
+		HealthcareTheme(),
+		FinanceTheme(),
+		EducationTheme(),
+		TechStartupTheme(),
+		LegalTheme(),
+		CreativeAgencyTheme(),
+		RealEstateTheme(),
+		RetailTheme(),
+		NonProfitTheme(),
+		GovernmentTheme(),
+		// Dark mode themes
+		DarkModern(),
+		DarkElegant(),
+		DarkMinimal(),
+		// High-contrast accessible themes
+		HighContrastLight(),
+		HighContrastDark(),
 	}
 }
 

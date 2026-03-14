@@ -19,15 +19,25 @@ const (
 	LayoutSection
 )
 
+// NoteParagraph represents a formatted paragraph in speaker notes
+type NoteParagraph struct {
+	Text     string
+	Bold     bool
+	Italic   bool
+	FontSize float64
+}
+
 // Slide represents a single slide in a presentation
 type Slide struct {
-	presentation *Presentation
-	index        int
-	elements     []SlideElement
-	layout       SlideLayout
-	background   *common.Color
-	notes        string
-	transition   *Transition
+	presentation   *Presentation
+	index          int
+	elements       []SlideElement
+	layout         SlideLayout
+	background     *common.Color
+	notes          string
+	formattedNotes []NoteParagraph
+	transition     *Transition
+	animations     []*Animation
 }
 
 // SlideElement is the interface for all slide elements
@@ -99,6 +109,12 @@ func (s *Slide) Notes() string { return s.notes }
 
 // SetTransition sets the slide transition
 func (s *Slide) SetTransition(t Transition) { s.transition = &t }
+
+// SetFormattedNotes sets formatted speaker notes
+func (s *Slide) SetFormattedNotes(paragraphs []NoteParagraph) { s.formattedNotes = paragraphs }
+
+// FormattedNotes returns the formatted notes
+func (s *Slide) FormattedNotes() []NoteParagraph { return s.formattedNotes }
 
 // Elements returns all elements on the slide
 func (s *Slide) Elements() []SlideElement { return s.elements }

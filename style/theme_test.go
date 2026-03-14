@@ -23,8 +23,8 @@ func TestDesignLevelString(t *testing.T) {
 
 func TestAllThemes(t *testing.T) {
 	themes := AllThemes()
-	if len(themes) != 6 {
-		t.Errorf("expected 6 themes, got %d", len(themes))
+	if len(themes) != 21 {
+		t.Errorf("expected 21 themes, got %d", len(themes))
 	}
 
 	// Verify each theme has required fields
@@ -43,17 +43,26 @@ func TestAllThemes(t *testing.T) {
 
 func TestThemesByLevel(t *testing.T) {
 	basic := ThemesByLevel(DesignLevelBasic)
-	if len(basic) != 1 {
-		t.Errorf("expected 1 basic theme, got %d", len(basic))
+	// BasicClean + HighContrastLight + HighContrastDark = 3
+	if len(basic) != 3 {
+		t.Errorf("expected 3 basic themes, got %d", len(basic))
+	}
+
+	professional := ThemesByLevel(DesignLevelProfessional)
+	// ProfessionalCorporate + Healthcare + Finance + Education + Legal + NonProfit + Government = 7
+	if len(professional) != 7 {
+		t.Errorf("expected 7 professional themes, got %d", len(professional))
 	}
 
 	premium := ThemesByLevel(DesignLevelPremium)
-	if len(premium) != 2 {
-		t.Errorf("expected 2 premium themes, got %d", len(premium))
+	// PremiumModern + PremiumElegant + TechStartup + RealEstate + Retail + DarkModern + DarkMinimal = 7
+	if len(premium) != 7 {
+		t.Errorf("expected 7 premium themes, got %d", len(premium))
 	}
 
 	luxury := ThemesByLevel(DesignLevelLuxury)
-	if len(luxury) != 2 {
-		t.Errorf("expected 2 luxury themes, got %d", len(luxury))
+	// LuxuryAgency + LuxuryWarm + CreativeAgency + DarkElegant = 4
+	if len(luxury) != 4 {
+		t.Errorf("expected 4 luxury themes, got %d", len(luxury))
 	}
 }

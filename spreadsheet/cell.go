@@ -33,6 +33,8 @@ type Cell struct {
 	hAlign   common.TextAlignment
 	vAlign   common.VerticalAlignment
 	numFmt   string
+	comment  *Comment
+	locked   *bool
 }
 
 func newCell(row *Row, col int) *Cell {

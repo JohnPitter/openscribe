@@ -12,12 +12,14 @@ import (
 
 // Presentation represents a PPTX presentation
 type Presentation struct {
-	pkg    *packaging.Package
-	slides []*Slide
-	master *SlideMaster
-	theme  *style.Theme
-	width  common.Measurement
-	height common.Measurement
+	pkg              *packaging.Package
+	slides           []*Slide
+	master           *SlideMaster
+	theme            *style.Theme
+	width            common.Measurement
+	height           common.Measurement
+	showSlideNumbers bool
+	slideNumberStart int
 }
 
 // New creates a new empty presentation (16:9 widescreen)

@@ -97,10 +97,11 @@ func (t *TableElement) Cols() int { return t.cols }
 
 // ImageElement represents an image on a PDF page
 type ImageElement struct {
-	data   *common.ImageData
-	x, y   float64
-	width  float64
-	height float64
+	data    *common.ImageData
+	x, y    float64
+	width   float64
+	height  float64
+	quality int // JPEG quality hint (0-100), 0 means default
 }
 
 func (img *ImageElement) pdfElement() {}
@@ -110,3 +111,17 @@ func (img *ImageElement) SetPosition(x, y float64) { img.x = x; img.y = y }
 
 // SetSize sets the image dimensions
 func (img *ImageElement) SetSize(w, h float64) { img.width = w; img.height = h }
+
+// SetQuality sets the JPEG quality hint (0-100)
+func (img *ImageElement) SetQuality(q int) {
+	if q < 0 {
+		q = 0
+	}
+	if q > 100 {
+		q = 100
+	}
+	img.quality = q
+}
+
+// Quality returns the JPEG quality hint
+func (img *ImageElement) Quality() int { return img.quality }
