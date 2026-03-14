@@ -36,7 +36,7 @@ Unlike commercial alternatives, OpenScribe is **completely free** for personal a
 
 | Category | What you get |
 |----------|-------------|
-| **DOCX** | Create, open, edit, save. Paragraphs, headings (1-6), tables, images, headers/footers, table of contents, page breaks, sections, fonts, colors, borders |
+| **DOCX** | Create, open, edit, save. Paragraphs, headings (1-6), tables, images, charts (bar/line/pie/area/column/donut), headers/footers, table of contents, lists (bullet/numbered), hyperlinks, footnotes, comments, custom styles, page breaks, sections |
 | **XLSX** | Create, open, edit, save. Multiple sheets, cell types (string/number/boolean/formula), merged cells, charts (bar/line/pie/area/column), conditional formatting (15 rule types, color scales, data bars), formula evaluation (SUM/AVG/MIN/MAX/COUNT/ABS/ROUND), column management |
 | **PPTX** | Create, open, edit, save. Slides, text boxes, shapes (12 types), charts, images, transitions (7 types with serialization), speaker notes, backgrounds, slide masters with 6 pre-built layouts, slide reordering |
 | **PDF** | Create, save, merge, split, extract. Text, lines, rectangles, tables, charts (bar/line/pie/area/horizontal bar), images, watermarks, page backgrounds, text extraction from elements and raw streams, HTML-to-PDF conversion |
@@ -110,6 +110,7 @@ go get github.com/JohnPitter/openscribe
 package main
 
 import (
+    "github.com/JohnPitter/openscribe/common"
     "github.com/JohnPitter/openscribe/document"
     "github.com/JohnPitter/openscribe/style"
 )
@@ -136,6 +137,13 @@ func main() {
     tbl.Cell(1, 1).SetText("$1.2M")
     tbl.Cell(2, 0).SetText("Growth")
     tbl.Cell(2, 1).SetText("+23%")
+
+    // Inline chart
+    chart := doc.AddChart(document.ChartTypeBar, common.In(5), common.In(3))
+    chart.SetTitle("Revenue by Quarter")
+    chart.SetCategories([]string{"Q1", "Q2", "Q3", "Q4"})
+    chart.AddSeries("2025", []float64{150, 200, 180, 250}, common.Blue)
+    chart.AddSeries("2026", []float64{180, 250, 220, 300}, common.Red)
 
     doc.Save("report.docx")
 }
@@ -345,6 +353,11 @@ Each level includes templates for: Reports, Invoices, Resumes, Letters, Dashboar
 ### Charts
 
 ```go
+// DOCX charts (OOXML DrawingML inline)
+chart := doc.AddChart(document.ChartTypeBar, common.In(5), common.In(3))
+chart.SetTitle("Revenue")
+chart.AddSeries("2025", []float64{150, 200, 180, 250}, common.Blue)
+
 // PDF charts (rendered with primitives)
 chart := page.AddChart(pdf.ChartTypePie, 72, 72, 300, 300)
 chart.SetTitle("Market Share")

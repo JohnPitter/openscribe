@@ -33,6 +33,8 @@ type Document struct {
 	commentCount  int
 	customStyles  []*CustomStyle
 	security      *common.SecurityOptions
+	charts        []*Chart
+	chartCount    int
 }
 
 // New creates a new empty DOCX document

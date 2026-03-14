@@ -74,6 +74,15 @@ func (d *Document) build() error {
 		ct.AddOverride("/word/comments.xml", packaging.ContentTypeComments)
 	}
 
+	// Build chart XML files and register relationships
+	for _, chart := range d.charts {
+		chartPath := fmt.Sprintf("word/charts/chart%d.xml", chart.index)
+		d.pkg.AddFile(chartPath, chart.buildChartXML())
+		relTarget := fmt.Sprintf("charts/chart%d.xml", chart.index)
+		chart.relID = docRels.Add(packaging.RelTypeChart, relTarget)
+		ct.AddOverride(fmt.Sprintf("/word/charts/chart%d.xml", chart.index), packaging.ContentTypeChart)
+	}
+
 	// Register hyperlink relationships and collect relIDs
 	// We need to do this before building document.xml so relIDs are available
 	for _, p := range d.paragraphs {
@@ -223,6 +232,26 @@ func (d *Document) buildDocumentXML(headerRelID, footerRelID string) ([]byte, er
 				`</wp:inline>`+
 				`</w:drawing></w:r></w:p>`,
 			nsWP, emuW, emuH, imgID, img.id, imgID, img.id, img.relID, emuW, emuH,
+		))
+	}
+
+	// Embed chart drawings as inline elements
+	for _, chart := range d.charts {
+		emuW := chart.width.EMUs()
+		emuH := chart.height.EMUs()
+		extraXML.WriteString(fmt.Sprintf(
+			`<w:p><w:r><w:drawing>`+
+				`<wp:inline xmlns:wp="%s" distT="0" distB="0" distL="0" distR="0">`+
+				`<wp:extent cx="%d" cy="%d"/>`+
+				`<wp:docPr id="%d" name="Chart %d"/>`+
+				`<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">`+
+				`<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">`+
+				`<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="%s"/>`+
+				`</a:graphicData>`+
+				`</a:graphic>`+
+				`</wp:inline>`+
+				`</w:drawing></w:r></w:p>`,
+			nsWP, emuW, emuH, 100+chart.index, chart.index, chart.relID,
 		))
 	}
 
