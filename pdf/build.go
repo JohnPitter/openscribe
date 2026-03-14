@@ -3,6 +3,9 @@ package pdf
 import (
 	"bytes"
 	"fmt"
+	"math"
+
+	"github.com/JohnPitter/openscribe/common"
 )
 
 // pdfWriter helps construct PDF content
@@ -126,6 +129,18 @@ func (d *Document) build() ([]byte, error) {
 
 			case *TableElement:
 				buildTablePDF(&content, e, pageH)
+
+			case *ChartElement:
+				buildChartPDF(&content, e, pageH)
+
+			case *ImageElement:
+				// Image rendering placeholder — images require XObject streams
+				// which need object-level support; draw a placeholder rectangle
+				y := pageH - e.y - e.height
+				fmt.Fprintf(&content, "0.9 0.9 0.9 rg\n")
+				fmt.Fprintf(&content, "%.2f %.2f %.2f %.2f re f\n", e.x, y, e.width, e.height)
+				fmt.Fprintf(&content, "0.5 0.5 0.5 RG\n0.5 w\n")
+				fmt.Fprintf(&content, "%.2f %.2f %.2f %.2f re S\n", e.x, y, e.width, e.height)
 			}
 		}
 
@@ -230,6 +245,513 @@ func buildTablePDF(content *bytes.Buffer, t *TableElement, pageH float64) {
 			}
 		}
 	}
+}
+
+func buildChartPDF(content *bytes.Buffer, c *ChartElement, pageH float64) {
+	chartX := c.x
+	chartY := pageH - c.y - c.height
+	chartW := c.width
+	chartH := c.height
+
+	titleH := 0.0
+	if c.title != "" {
+		titleH = 20.0
+	}
+	legendH := 0.0
+	if c.showLegend && len(c.series) > 0 {
+		legendH = 20.0
+	}
+
+	plotX := chartX + 40
+	plotY := chartY + 25 + legendH
+	plotW := chartW - 50
+	plotH := chartH - titleH - 30 - legendH
+
+	// Background
+	if c.bgColor != nil {
+		setFillColor(content, *c.bgColor)
+		fmt.Fprintf(content, "%.2f %.2f %.2f %.2f re f\n", chartX, chartY, chartW, chartH)
+	}
+
+	// Title
+	if c.title != "" {
+		setFillColor(content, c.titleFont.Color)
+		fmt.Fprintf(content, "BT\n/F1 %.1f Tf\n", c.titleFont.Size)
+		fmt.Fprintf(content, "%.2f %.2f Td\n", chartX+chartW/2-float64(len(c.title))*3, chartY+chartH-titleH+5)
+		fmt.Fprintf(content, "(%s) Tj\nET\n", escapePDF(c.title))
+	}
+
+	switch c.chartType {
+	case ChartTypeBar:
+		buildBarChart(content, c, plotX, plotY, plotW, plotH)
+	case ChartTypeHorizontalBar:
+		buildHorizontalBarChart(content, c, plotX, plotY, plotW, plotH)
+	case ChartTypeLine:
+		buildLineChart(content, c, plotX, plotY, plotW, plotH)
+	case ChartTypePie:
+		buildPieChart(content, c, plotX, plotY, plotW, plotH)
+	case ChartTypeArea:
+		buildAreaChart(content, c, plotX, plotY, plotW, plotH)
+	}
+
+	// Legend
+	if c.showLegend && len(c.series) > 0 {
+		lx := chartX + 40
+		ly := chartY + 5
+		for i, s := range c.series {
+			setFillColor(content, s.Color)
+			fmt.Fprintf(content, "%.2f %.2f 8 8 re f\n", lx+float64(i)*80, ly)
+			fmt.Fprintf(content, "BT\n/F1 8 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+				lx+float64(i)*80+12, ly+1, escapePDF(s.Name))
+		}
+	}
+}
+
+func buildBarChart(content *bytes.Buffer, c *ChartElement, plotX, plotY, plotW, plotH float64) {
+	maxVal := findMaxValue(c.series)
+	if maxVal == 0 {
+		maxVal = 1
+	}
+
+	numCats := len(c.categories)
+	if numCats == 0 {
+		for _, s := range c.series {
+			if len(s.Values) > numCats {
+				numCats = len(s.Values)
+			}
+		}
+	}
+	if numCats == 0 {
+		return
+	}
+
+	numSeries := len(c.series)
+	if numSeries == 0 {
+		return
+	}
+	catWidth := plotW / float64(numCats)
+	barWidth := catWidth / float64(numSeries+1)
+
+	// Draw axes
+	setStrokeColor(content, c.axisColor)
+	fmt.Fprintf(content, "1 w\n")
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, plotY, plotX, plotY+plotH)
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, plotY, plotX+plotW, plotY)
+
+	// Grid lines
+	setStrokeColor(content, c.gridColor)
+	fmt.Fprintf(content, "0.5 w\n")
+	for i := 1; i <= 5; i++ {
+		gy := plotY + plotH*float64(i)/5
+		fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, gy, plotX+plotW, gy)
+		label := fmt.Sprintf("%.0f", maxVal*float64(i)/5)
+		fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+			plotX-30, gy-3, label)
+	}
+
+	// Bars
+	for ci := 0; ci < numCats; ci++ {
+		for si, s := range c.series {
+			if ci >= len(s.Values) {
+				continue
+			}
+			val := s.Values[ci]
+			barH := (val / maxVal) * plotH
+			bx := plotX + float64(ci)*catWidth + float64(si)*barWidth + barWidth/2
+			by := plotY
+
+			setFillColor(content, s.Color)
+			fmt.Fprintf(content, "%.2f %.2f %.2f %.2f re f\n", bx, by, barWidth*0.9, barH)
+
+			if c.showValues {
+				fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+					bx+2, by+barH+3, fmt.Sprintf("%.0f", val))
+			}
+		}
+
+		if ci < len(c.categories) {
+			cx := plotX + float64(ci)*catWidth + catWidth/2
+			fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+				cx-float64(len(c.categories[ci]))*2, plotY-12, escapePDF(c.categories[ci]))
+		}
+	}
+}
+
+func buildHorizontalBarChart(content *bytes.Buffer, c *ChartElement, plotX, plotY, plotW, plotH float64) {
+	maxVal := findMaxValue(c.series)
+	if maxVal == 0 {
+		maxVal = 1
+	}
+
+	numCats := len(c.categories)
+	if numCats == 0 {
+		for _, s := range c.series {
+			if len(s.Values) > numCats {
+				numCats = len(s.Values)
+			}
+		}
+	}
+	if numCats == 0 {
+		return
+	}
+
+	numSeries := len(c.series)
+	if numSeries == 0 {
+		return
+	}
+	catHeight := plotH / float64(numCats)
+	barHeight := catHeight / float64(numSeries+1)
+
+	// Axes
+	setStrokeColor(content, c.axisColor)
+	fmt.Fprintf(content, "1 w\n")
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, plotY, plotX, plotY+plotH)
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, plotY, plotX+plotW, plotY)
+
+	// Grid lines
+	setStrokeColor(content, c.gridColor)
+	fmt.Fprintf(content, "0.5 w\n")
+	for i := 1; i <= 5; i++ {
+		gx := plotX + plotW*float64(i)/5
+		fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", gx, plotY, gx, plotY+plotH)
+		label := fmt.Sprintf("%.0f", maxVal*float64(i)/5)
+		fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+			gx-8, plotY-12, label)
+	}
+
+	// Bars
+	for ci := 0; ci < numCats; ci++ {
+		for si, s := range c.series {
+			if ci >= len(s.Values) {
+				continue
+			}
+			val := s.Values[ci]
+			barW := (val / maxVal) * plotW
+			bx := plotX
+			by := plotY + float64(ci)*catHeight + float64(si)*barHeight + barHeight/2
+
+			setFillColor(content, s.Color)
+			fmt.Fprintf(content, "%.2f %.2f %.2f %.2f re f\n", bx, by, barW, barHeight*0.9)
+
+			if c.showValues {
+				fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+					bx+barW+3, by+2, fmt.Sprintf("%.0f", val))
+			}
+		}
+
+		if ci < len(c.categories) {
+			cy := plotY + float64(ci)*catHeight + catHeight/2
+			fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+				plotX-38, cy-3, escapePDF(c.categories[ci]))
+		}
+	}
+}
+
+func buildLineChart(content *bytes.Buffer, c *ChartElement, plotX, plotY, plotW, plotH float64) {
+	maxVal := findMaxValue(c.series)
+	if maxVal == 0 {
+		maxVal = 1
+	}
+
+	numCats := len(c.categories)
+	if numCats == 0 {
+		for _, s := range c.series {
+			if len(s.Values) > numCats {
+				numCats = len(s.Values)
+			}
+		}
+	}
+	if numCats < 2 {
+		return
+	}
+
+	// Axes
+	setStrokeColor(content, c.axisColor)
+	fmt.Fprintf(content, "1 w\n")
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, plotY, plotX, plotY+plotH)
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, plotY, plotX+plotW, plotY)
+
+	// Grid lines
+	setStrokeColor(content, c.gridColor)
+	fmt.Fprintf(content, "0.5 w\n")
+	for i := 1; i <= 5; i++ {
+		gy := plotY + plotH*float64(i)/5
+		fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, gy, plotX+plotW, gy)
+		label := fmt.Sprintf("%.0f", maxVal*float64(i)/5)
+		fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+			plotX-30, gy-3, label)
+	}
+
+	// Category labels
+	for ci := 0; ci < numCats; ci++ {
+		cx := plotX + float64(ci)*plotW/float64(numCats-1)
+		if ci < len(c.categories) {
+			fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+				cx-float64(len(c.categories[ci]))*2, plotY-12, escapePDF(c.categories[ci]))
+		}
+	}
+
+	// Lines and points
+	for _, s := range c.series {
+		if len(s.Values) < 2 {
+			continue
+		}
+		setStrokeColor(content, s.Color)
+		fmt.Fprintf(content, "1.5 w\n")
+
+		for i := 0; i < len(s.Values) && i < numCats; i++ {
+			px := plotX + float64(i)*plotW/float64(numCats-1)
+			py := plotY + (s.Values[i]/maxVal)*plotH
+
+			if i == 0 {
+				fmt.Fprintf(content, "%.2f %.2f m\n", px, py)
+			} else {
+				fmt.Fprintf(content, "%.2f %.2f l\n", px, py)
+			}
+		}
+		fmt.Fprintf(content, "S\n")
+
+		// Data points (small circles)
+		setFillColor(content, s.Color)
+		for i := 0; i < len(s.Values) && i < numCats; i++ {
+			px := plotX + float64(i)*plotW/float64(numCats-1)
+			py := plotY + (s.Values[i]/maxVal)*plotH
+			r := 2.5
+			// Approximate circle with 4 bezier curves
+			k := r * 0.5523
+			fmt.Fprintf(content, "%.2f %.2f m\n", px+r, py)
+			fmt.Fprintf(content, "%.2f %.2f %.2f %.2f %.2f %.2f c\n", px+r, py+k, px+k, py+r, px, py+r)
+			fmt.Fprintf(content, "%.2f %.2f %.2f %.2f %.2f %.2f c\n", px-k, py+r, px-r, py+k, px-r, py)
+			fmt.Fprintf(content, "%.2f %.2f %.2f %.2f %.2f %.2f c\n", px-r, py-k, px-k, py-r, px, py-r)
+			fmt.Fprintf(content, "%.2f %.2f %.2f %.2f %.2f %.2f c\n", px+k, py-r, px+r, py-k, px+r, py)
+			fmt.Fprintf(content, "f\n")
+		}
+	}
+}
+
+func buildAreaChart(content *bytes.Buffer, c *ChartElement, plotX, plotY, plotW, plotH float64) {
+	maxVal := findMaxValue(c.series)
+	if maxVal == 0 {
+		maxVal = 1
+	}
+
+	numCats := len(c.categories)
+	if numCats == 0 {
+		for _, s := range c.series {
+			if len(s.Values) > numCats {
+				numCats = len(s.Values)
+			}
+		}
+	}
+	if numCats < 2 {
+		return
+	}
+
+	// Axes
+	setStrokeColor(content, c.axisColor)
+	fmt.Fprintf(content, "1 w\n")
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, plotY, plotX, plotY+plotH)
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, plotY, plotX+plotW, plotY)
+
+	// Grid lines
+	setStrokeColor(content, c.gridColor)
+	fmt.Fprintf(content, "0.5 w\n")
+	for i := 1; i <= 5; i++ {
+		gy := plotY + plotH*float64(i)/5
+		fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l S\n", plotX, gy, plotX+plotW, gy)
+		label := fmt.Sprintf("%.0f", maxVal*float64(i)/5)
+		fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+			plotX-30, gy-3, label)
+	}
+
+	// Category labels
+	for ci := 0; ci < numCats; ci++ {
+		cx := plotX + float64(ci)*plotW/float64(numCats-1)
+		if ci < len(c.categories) {
+			fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+				cx-float64(len(c.categories[ci]))*2, plotY-12, escapePDF(c.categories[ci]))
+		}
+	}
+
+	// Filled areas and lines
+	for _, s := range c.series {
+		if len(s.Values) < 2 {
+			continue
+		}
+
+		// Semi-transparent fill
+		fmt.Fprintf(content, "%.3f %.3f %.3f rg\n",
+			float64(s.Color.R)/255*0.7+0.3,
+			float64(s.Color.G)/255*0.7+0.3,
+			float64(s.Color.B)/255*0.7+0.3)
+
+		// Build filled path: start at baseline, go up through points, back to baseline
+		firstX := plotX
+		fmt.Fprintf(content, "%.2f %.2f m\n", firstX, plotY)
+		for i := 0; i < len(s.Values) && i < numCats; i++ {
+			px := plotX + float64(i)*plotW/float64(numCats-1)
+			py := plotY + (s.Values[i]/maxVal)*plotH
+			fmt.Fprintf(content, "%.2f %.2f l\n", px, py)
+		}
+		lastIdx := len(s.Values) - 1
+		if lastIdx >= numCats {
+			lastIdx = numCats - 1
+		}
+		lastX := plotX + float64(lastIdx)*plotW/float64(numCats-1)
+		fmt.Fprintf(content, "%.2f %.2f l\n", lastX, plotY)
+		fmt.Fprintf(content, "f\n")
+
+		// Stroke the line on top
+		setStrokeColor(content, s.Color)
+		fmt.Fprintf(content, "1.5 w\n")
+		for i := 0; i < len(s.Values) && i < numCats; i++ {
+			px := plotX + float64(i)*plotW/float64(numCats-1)
+			py := plotY + (s.Values[i]/maxVal)*plotH
+			if i == 0 {
+				fmt.Fprintf(content, "%.2f %.2f m\n", px, py)
+			} else {
+				fmt.Fprintf(content, "%.2f %.2f l\n", px, py)
+			}
+		}
+		fmt.Fprintf(content, "S\n")
+	}
+}
+
+func buildPieChart(content *bytes.Buffer, c *ChartElement, plotX, plotY, plotW, plotH float64) {
+	if len(c.series) == 0 || len(c.series[0].Values) == 0 {
+		return
+	}
+
+	values := c.series[0].Values
+	total := 0.0
+	for _, v := range values {
+		total += v
+	}
+	if total == 0 {
+		return
+	}
+
+	// Default slice colors
+	sliceColors := []common.Color{
+		common.Blue,
+		common.Red,
+		common.Green,
+		common.Orange,
+		common.Purple,
+		common.Yellow,
+		{R: 0, G: 191, B: 255, A: 255},   // deep sky blue
+		{R: 255, G: 105, B: 180, A: 255},  // hot pink
+		{R: 34, G: 139, B: 34, A: 255},    // forest green
+		{R: 255, G: 215, B: 0, A: 255},    // gold
+	}
+
+	// Center and radius
+	cx := plotX + plotW/2
+	cy := plotY + plotH/2
+	radius := math.Min(plotW, plotH) / 2 * 0.8
+
+	startAngle := 0.0
+	for i, v := range values {
+		sweepAngle := (v / total) * 2 * math.Pi
+		endAngle := startAngle + sweepAngle
+
+		color := sliceColors[i%len(sliceColors)]
+		setFillColor(content, color)
+
+		// Draw pie slice using move to center, line to arc start, bezier arcs, close
+		drawPieSlice(content, cx, cy, radius, startAngle, endAngle)
+
+		startAngle = endAngle
+	}
+
+	// Legend for pie (category names with colors)
+	if c.showLegend && len(c.categories) > 0 {
+		lx := plotX + plotW + 5
+		for i := 0; i < len(values) && i < len(c.categories); i++ {
+			ly := plotY + plotH - float64(i)*14 - 10
+			color := sliceColors[i%len(sliceColors)]
+			setFillColor(content, color)
+			fmt.Fprintf(content, "%.2f %.2f 8 8 re f\n", lx, ly)
+			pct := fmt.Sprintf("%s (%.0f%%)", escapePDF(c.categories[i]), v(values[i], total))
+			fmt.Fprintf(content, "BT\n/F1 7 Tf\n0 0 0 rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+				lx+12, ly+1, pct)
+		}
+	}
+}
+
+// v calculates percentage
+func v(val, total float64) float64 {
+	return val / total * 100
+}
+
+// drawPieSlice draws a filled pie slice using bezier curve approximation
+func drawPieSlice(content *bytes.Buffer, cx, cy, r, startAngle, endAngle float64) {
+	// Move to center
+	fmt.Fprintf(content, "%.2f %.2f m\n", cx, cy)
+
+	// Line to start of arc
+	sx := cx + r*math.Cos(startAngle)
+	sy := cy + r*math.Sin(startAngle)
+	fmt.Fprintf(content, "%.2f %.2f l\n", sx, sy)
+
+	// Draw arc segments (split into segments of max 90 degrees)
+	angle := startAngle
+	remaining := endAngle - startAngle
+	for remaining > 0 {
+		segment := math.Min(remaining, math.Pi/2)
+		drawArcSegment(content, cx, cy, r, angle, angle+segment)
+		angle += segment
+		remaining -= segment
+	}
+
+	// Close path and fill
+	fmt.Fprintf(content, "f\n")
+}
+
+// drawArcSegment draws a single arc segment using a cubic bezier approximation
+func drawArcSegment(content *bytes.Buffer, cx, cy, r, startAngle, endAngle float64) {
+	halfAngle := (endAngle - startAngle) / 2
+	midAngle := startAngle + halfAngle
+
+	// Control point distance for bezier approximation of arc
+	alpha := 4.0 / 3.0 * math.Tan(halfAngle) * r
+
+	// Start point
+	x0 := cx + r*math.Cos(startAngle)
+	y0 := cy + r*math.Sin(startAngle)
+
+	// End point
+	x3 := cx + r*math.Cos(endAngle)
+	y3 := cy + r*math.Sin(endAngle)
+
+	// Control points
+	_ = midAngle
+	x1 := x0 - alpha*math.Sin(startAngle)
+	y1 := y0 + alpha*math.Cos(startAngle)
+	x2 := x3 + alpha*math.Sin(endAngle)
+	y2 := y3 - alpha*math.Cos(endAngle)
+
+	fmt.Fprintf(content, "%.2f %.2f %.2f %.2f %.2f %.2f c\n", x1, y1, x2, y2, x3, y3)
+}
+
+func findMaxValue(series []ChartSeries) float64 {
+	max := 0.0
+	for _, s := range series {
+		for _, v := range s.Values {
+			if v > max {
+				max = v
+			}
+		}
+	}
+	return max
+}
+
+func setFillColor(content *bytes.Buffer, c common.Color) {
+	fmt.Fprintf(content, "%.3f %.3f %.3f rg\n", float64(c.R)/255, float64(c.G)/255, float64(c.B)/255)
+}
+
+func setStrokeColor(content *bytes.Buffer, c common.Color) {
+	fmt.Fprintf(content, "%.3f %.3f %.3f RG\n", float64(c.R)/255, float64(c.G)/255, float64(c.B)/255)
 }
 
 func escapePDF(s string) string {

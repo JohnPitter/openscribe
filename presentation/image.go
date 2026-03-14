@@ -8,6 +8,7 @@ type SlideImage struct {
 	x, y   common.Measurement
 	width  common.Measurement
 	height common.Measurement
+	relID  string
 }
 
 func (img *SlideImage) elementType() string { return "image" }

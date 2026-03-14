@@ -1,6 +1,7 @@
 package spreadsheet
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"sort"
@@ -19,6 +20,9 @@ func (wb *Workbook) build() error {
 
 	// Build each sheet
 	wbRels := packaging.NewRelationships()
+	ct := packaging.NewContentTypes()
+	chartGlobalIdx := 0
+
 	for i, sheet := range wb.sheets {
 		sheetPath := fmt.Sprintf("xl/worksheets/sheet%d.xml", i+1)
 		data, err := wb.buildSheetXML(sheet)
@@ -27,6 +31,52 @@ func (wb *Workbook) build() error {
 		}
 		wb.pkg.AddFile(sheetPath, data)
 		wbRels.Add(packaging.RelTypeWorksheet, fmt.Sprintf("worksheets/sheet%d.xml", i+1))
+		ct.AddOverride(fmt.Sprintf("/xl/worksheets/sheet%d.xml", i+1), packaging.ContentTypeWorksheet)
+
+		// Charts for this sheet
+		if len(sheet.charts) > 0 {
+			drawingIdx := i + 1
+
+			// Sheet relationships: link sheet -> drawing
+			sheetRels := packaging.NewRelationships()
+			sheetRels.Add(packaging.RelTypeDrawing, fmt.Sprintf("../drawings/drawing%d.xml", drawingIdx))
+			sheetRelsData, rErr := sheetRels.Marshal()
+			if rErr != nil {
+				return fmt.Errorf("marshal sheet rels: %w", rErr)
+			}
+			wb.pkg.AddFile(fmt.Sprintf("xl/worksheets/_rels/sheet%d.xml.rels", i+1), sheetRelsData)
+
+			// Drawing relationships: link drawing -> charts
+			drawingRels := packaging.NewRelationships()
+			for j, chart := range sheet.charts {
+				chartGlobalIdx++
+				chartPath := fmt.Sprintf("xl/charts/chart%d.xml", chartGlobalIdx)
+
+				chartData, cErr := wb.buildChartXML(chart, chartGlobalIdx)
+				if cErr != nil {
+					return fmt.Errorf("build chart %d: %w", chartGlobalIdx, cErr)
+				}
+				wb.pkg.AddFile(chartPath, chartData)
+				ct.AddOverride(fmt.Sprintf("/xl/charts/chart%d.xml", chartGlobalIdx), packaging.ContentTypeChart)
+
+				_ = j
+				drawingRels.Add(packaging.RelTypeChart, fmt.Sprintf("../charts/chart%d.xml", chartGlobalIdx))
+			}
+
+			drawingRelsData, drErr := drawingRels.Marshal()
+			if drErr != nil {
+				return fmt.Errorf("marshal drawing rels: %w", drErr)
+			}
+			wb.pkg.AddFile(fmt.Sprintf("xl/drawings/_rels/drawing%d.xml.rels", drawingIdx), drawingRelsData)
+
+			// Drawing XML
+			drawingData, dErr := wb.buildDrawingXML(sheet.charts)
+			if dErr != nil {
+				return fmt.Errorf("build drawing %d: %w", drawingIdx, dErr)
+			}
+			wb.pkg.AddFile(fmt.Sprintf("xl/drawings/drawing%d.xml", drawingIdx), drawingData)
+			ct.AddOverride(fmt.Sprintf("/xl/drawings/drawing%d.xml", drawingIdx), packaging.ContentTypeDrawing)
+		}
 	}
 
 	// Shared strings
@@ -37,6 +87,7 @@ func (wb *Workbook) build() error {
 		}
 		wb.pkg.AddFile("xl/sharedStrings.xml", ssData)
 		wbRels.Add(packaging.RelTypeSharedStrings, "sharedStrings.xml")
+		ct.AddOverride("/xl/sharedStrings.xml", packaging.ContentTypeSharedStrings)
 	}
 
 	// Workbook XML
@@ -45,6 +96,7 @@ func (wb *Workbook) build() error {
 		return fmt.Errorf("build workbook: %w", err)
 	}
 	wb.pkg.AddFile("xl/workbook.xml", wbData)
+	ct.AddOverride("/xl/workbook.xml", packaging.ContentTypeXlsx)
 
 	// Workbook relationships
 	wbRelsData, err := wbRels.Marshal()
@@ -63,14 +115,6 @@ func (wb *Workbook) build() error {
 	wb.pkg.AddFile("_rels/.rels", topRelsData)
 
 	// Content types
-	ct := packaging.NewContentTypes()
-	ct.AddOverride("/xl/workbook.xml", packaging.ContentTypeXlsx)
-	for i := range wb.sheets {
-		ct.AddOverride(fmt.Sprintf("/xl/worksheets/sheet%d.xml", i+1), packaging.ContentTypeWorksheet)
-	}
-	if len(wb.sharedStrings) > 0 {
-		ct.AddOverride("/xl/sharedStrings.xml", packaging.ContentTypeSharedStrings)
-	}
 	ctData, err := ct.Marshal()
 	if err != nil {
 		return fmt.Errorf("marshal content types: %w", err)
@@ -315,4 +359,129 @@ func parseCellRefCol(ref string) int {
 		}
 	}
 	return col
+}
+
+// buildChartXML generates DrawingML chart XML
+func (wb *Workbook) buildChartXML(chart *Chart, chartIndex int) ([]byte, error) {
+	chartTypeTag := "c:barChart"
+	grouping := "clustered"
+	switch chart.chartType {
+	case ChartTypeLine:
+		chartTypeTag = "c:lineChart"
+		grouping = "standard"
+	case ChartTypePie:
+		chartTypeTag = "c:pieChart"
+		grouping = ""
+	case ChartTypeArea:
+		chartTypeTag = "c:areaChart"
+		grouping = "standard"
+	case ChartTypeScatter:
+		chartTypeTag = "c:scatterChart"
+		grouping = ""
+	case ChartTypeColumn:
+		chartTypeTag = "c:barChart"
+		grouping = "clustered"
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	buf.WriteString(`<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`)
+	buf.WriteString(`<c:chart>`)
+
+	// Title
+	if chart.showTitle && chart.title != "" {
+		fmt.Fprintf(&buf, `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>%s</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`, escapeXMLText(chart.title))
+	}
+
+	buf.WriteString(`<c:plotArea><c:layout/>`)
+
+	// Chart type element
+	fmt.Fprintf(&buf, `<%s>`, chartTypeTag)
+	if grouping != "" {
+		fmt.Fprintf(&buf, `<c:grouping val="%s"/>`, grouping)
+	}
+
+	// Series
+	for i, s := range chart.series {
+		fmt.Fprintf(&buf, `<c:ser><c:idx val="%d"/><c:order val="%d"/>`, i, i)
+		if s.Name != "" {
+			fmt.Fprintf(&buf, `<c:tx><c:strRef><c:f>"%s"</c:f></c:strRef></c:tx>`, escapeXMLText(s.Name))
+		}
+		// Color
+		fmt.Fprintf(&buf, `<c:spPr><a:solidFill><a:srgbClr val="%02X%02X%02X"/></a:solidFill></c:spPr>`, s.Color.R, s.Color.G, s.Color.B)
+
+		// Category data
+		if len(chart.categories) > 0 {
+			buf.WriteString(`<c:cat><c:strLit>`)
+			fmt.Fprintf(&buf, `<c:ptCount val="%d"/>`, len(chart.categories))
+			for j, cat := range chart.categories {
+				fmt.Fprintf(&buf, `<c:pt idx="%d"><c:v>%s</c:v></c:pt>`, j, escapeXMLText(cat))
+			}
+			buf.WriteString(`</c:strLit></c:cat>`)
+		}
+
+		// Values
+		if len(s.Values) > 0 {
+			buf.WriteString(`<c:val><c:numLit>`)
+			fmt.Fprintf(&buf, `<c:ptCount val="%d"/>`, len(s.Values))
+			for j, v := range s.Values {
+				fmt.Fprintf(&buf, `<c:pt idx="%d"><c:v>%s</c:v></c:pt>`, j, strconv.FormatFloat(v, 'f', -1, 64))
+			}
+			buf.WriteString(`</c:numLit></c:val>`)
+		}
+
+		buf.WriteString(`</c:ser>`)
+	}
+
+	fmt.Fprintf(&buf, `</%s>`, chartTypeTag)
+	buf.WriteString(`</c:plotArea>`)
+
+	// Legend
+	if chart.showLegend {
+		buf.WriteString(`<c:legend><c:legendPos val="b"/></c:legend>`)
+	}
+
+	buf.WriteString(`</c:chart></c:chartSpace>`)
+	return buf.Bytes(), nil
+}
+
+// buildDrawingXML generates the worksheet drawing XML that anchors charts
+func (wb *Workbook) buildDrawingXML(charts []*Chart) ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	buf.WriteString(`<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`)
+
+	for i, c := range charts {
+		buf.WriteString(`<xdr:twoCellAnchor>`)
+		fmt.Fprintf(&buf, `<xdr:from><xdr:col>%d</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>`, c.x-1, c.y-1)
+		fmt.Fprintf(&buf, `<xdr:to><xdr:col>%d</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>`, c.x-1+c.width, c.y-1+c.height)
+		fmt.Fprintf(&buf, `<xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id="%d" name="Chart %d"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>`, i+2, i+1)
+		buf.WriteString(`<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>`)
+		fmt.Fprintf(&buf, `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rId%d" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/></a:graphicData></a:graphic>`, i+1)
+		buf.WriteString(`</xdr:graphicFrame><xdr:clientData/>`)
+		buf.WriteString(`</xdr:twoCellAnchor>`)
+	}
+
+	buf.WriteString(`</xdr:wsDr>`)
+	return buf.Bytes(), nil
+}
+
+// escapeXMLText escapes special characters for XML text content
+func escapeXMLText(s string) string {
+	var buf bytes.Buffer
+	for _, c := range s {
+		switch c {
+		case '&':
+			buf.WriteString("&amp;")
+		case '<':
+			buf.WriteString("&lt;")
+		case '>':
+			buf.WriteString("&gt;")
+		case '"':
+			buf.WriteString("&quot;")
+		default:
+			buf.WriteRune(c)
+		}
+	}
+	return buf.String()
 }

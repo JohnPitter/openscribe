@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/JohnPitter/openscribe/common"
+	"github.com/JohnPitter/openscribe/internal/packaging"
 	"github.com/JohnPitter/openscribe/style"
 )
 
@@ -216,4 +217,127 @@ func TestDelete(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Error("file should be deleted")
 	}
+}
+
+func TestHeaderFooter(t *testing.T) {
+	doc := New()
+	doc.AddText("Content")
+
+	h := doc.Header()
+	h.SetLeft("Company Name")
+	h.SetCenter("Confidential")
+	h.SetRight("Page 1")
+
+	f := doc.Footer()
+	f.SetCenter("© 2026 Company")
+
+	if h.Left() != "Company Name" {
+		t.Error("header left mismatch")
+	}
+	if h.Center() != "Confidential" {
+		t.Error("header center mismatch")
+	}
+	if f.Center() != "© 2026 Company" {
+		t.Error("footer center mismatch")
+	}
+	if f.IsEmpty() {
+		t.Error("footer should not be empty")
+	}
+
+	empty := &HeaderFooter{}
+	if !empty.IsEmpty() {
+		t.Error("empty header should be empty")
+	}
+
+	path := filepath.Join(t.TempDir(), "header_footer.docx")
+	if err := doc.Save(path); err != nil {
+		t.Fatalf("save error: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("file should exist: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Error("file should not be empty")
+	}
+
+	// Verify header and footer files exist in the package
+	pkg, err := packaging.OpenPackage(path)
+	if err != nil {
+		t.Fatalf("open package error: %v", err)
+	}
+	if !pkg.HasFile("word/header1.xml") {
+		t.Error("header1.xml should exist in package")
+	}
+	if !pkg.HasFile("word/footer1.xml") {
+		t.Error("footer1.xml should exist in package")
+	}
+}
+
+func TestImageEmbedding(t *testing.T) {
+	doc := New()
+	doc.AddHeading("Document with Image", 1)
+
+	// Create test image data (minimal PNG header bytes)
+	imgData := &common.ImageData{
+		Data:   []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A},
+		Format: common.ImageFormatPNG,
+	}
+	ref := doc.AddImage(imgData, common.In(4), common.In(3))
+
+	if ref.ID() == "" {
+		t.Error("image should have an ID")
+	}
+
+	doc.AddText("Text after image")
+
+	path := filepath.Join(t.TempDir(), "with_image.docx")
+	if err := doc.Save(path); err != nil {
+		t.Fatalf("save error: %v", err)
+	}
+
+	// Verify the image file is in the package
+	pkg, err := packaging.OpenPackage(path)
+	if err != nil {
+		t.Fatalf("open package error: %v", err)
+	}
+
+	// Check that media file exists
+	found := false
+	for name := range pkg.Files {
+		if len(name) > 11 && name[:11] == "word/media/" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("image media file not found in package (expected word/media/img1.png)")
+	}
+
+	// Verify the document.xml contains drawing elements
+	docXML, ok := pkg.GetFile("word/document.xml")
+	if !ok {
+		t.Fatal("document.xml not found in package")
+	}
+	docStr := string(docXML)
+	if !containsSubstring(docStr, "w:drawing") {
+		t.Error("document.xml should contain w:drawing element for embedded image")
+	}
+	if !containsSubstring(docStr, "r:embed") {
+		t.Error("document.xml should contain r:embed attribute for image relationship")
+	}
+}
+
+func containsSubstring(s, substr string) bool {
+	return len(s) >= len(substr) && searchSubstring(s, substr)
+}
+
+func searchSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

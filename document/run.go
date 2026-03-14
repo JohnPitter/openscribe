@@ -72,8 +72,8 @@ func (r *Run) SetFontFamily(family string) *Run { r.fontFamily = family; return 
 // SetHighlight sets text highlight color
 func (r *Run) SetHighlight(color string) *Run { r.highlight = color; return r }
 
-// MarshalXML creates the w:r XML element
-func (r *Run) MarshalXML() xmlRun {
+// toXML creates the w:r XML element
+func (r *Run) toXML() xmlRun {
 	xr := xmlRun{}
 
 	// Run properties

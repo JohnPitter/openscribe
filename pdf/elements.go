@@ -94,3 +94,19 @@ func (t *TableElement) Rows() int { return t.rows }
 
 // Cols returns the number of columns
 func (t *TableElement) Cols() int { return t.cols }
+
+// ImageElement represents an image on a PDF page
+type ImageElement struct {
+	data   *common.ImageData
+	x, y   float64
+	width  float64
+	height float64
+}
+
+func (img *ImageElement) pdfElement() {}
+
+// SetPosition sets the image position
+func (img *ImageElement) SetPosition(x, y float64) { img.x = x; img.y = y }
+
+// SetSize sets the image dimensions
+func (img *ImageElement) SetSize(w, h float64) { img.width = w; img.height = h }

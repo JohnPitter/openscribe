@@ -22,6 +22,10 @@ const (
 	ContentTypePNG           = "image/png"
 	ContentTypeJPEG          = "image/jpeg"
 	ContentTypeCoreProps     = "application/vnd.openxmlformats-package.core-properties+xml"
+	ContentTypeChart         = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+	ContentTypeDrawing       = "application/vnd.openxmlformats-officedocument.drawing+xml"
+	ContentTypeHeader        = "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
+	ContentTypeFooter        = "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"
 )
 
 // ContentTypes represents [Content_Types].xml

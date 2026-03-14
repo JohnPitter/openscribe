@@ -20,6 +20,10 @@ const (
 	RelTypeSlideMaster    = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster"
 	RelTypeSlideLayout    = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout"
 	RelTypeCoreProperties = "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties"
+	RelTypeDrawing        = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"
+	RelTypeChart          = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart"
+	RelTypeHeader         = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
+	RelTypeFooter         = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
 )
 
 // Relationships represents the _rels/.rels file

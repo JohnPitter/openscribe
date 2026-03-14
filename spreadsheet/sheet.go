@@ -13,7 +13,9 @@ type Sheet struct {
 	index       int
 	rows        map[int]*Row
 	colWidths   map[int]float64
+	columns     map[int]*Column
 	mergedCells []MergedCell
+	charts      []*Chart
 	maxRow      int
 	maxCol      int
 }
@@ -33,6 +35,7 @@ func newSheet(wb *Workbook, name string, index int) *Sheet {
 		index:     index,
 		rows:      make(map[int]*Row),
 		colWidths: make(map[int]float64),
+		columns:   make(map[int]*Column),
 	}
 }
 

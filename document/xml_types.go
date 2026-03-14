@@ -123,8 +123,15 @@ type xmlShading struct {
 }
 
 type xmlSectionProps struct {
-	PgSz  *xmlPageSize    `xml:"w:pgSz,omitempty"`
-	PgMar *xmlPageMargins `xml:"w:pgMar,omitempty"`
+	HeaderRef *xmlHeaderFooterRef `xml:"w:headerReference,omitempty"`
+	FooterRef *xmlHeaderFooterRef `xml:"w:footerReference,omitempty"`
+	PgSz      *xmlPageSize       `xml:"w:pgSz,omitempty"`
+	PgMar     *xmlPageMargins    `xml:"w:pgMar,omitempty"`
+}
+
+type xmlHeaderFooterRef struct {
+	Type string `xml:"w:type,attr"`
+	RID  string `xml:"r:id,attr"`
 }
 
 type xmlPageSize struct {

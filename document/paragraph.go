@@ -112,8 +112,8 @@ func (p *Paragraph) Text() string {
 	return text
 }
 
-// MarshalXML creates the w:p element
-func (p *Paragraph) MarshalXML() xmlParagraph {
+// toXML creates the w:p element
+func (p *Paragraph) toXML() xmlParagraph {
 	xp := xmlParagraph{}
 
 	// Paragraph properties
@@ -137,7 +137,7 @@ func (p *Paragraph) MarshalXML() xmlParagraph {
 
 	// Runs
 	for _, r := range p.runs {
-		xp.Runs = append(xp.Runs, r.MarshalXML())
+		xp.Runs = append(xp.Runs, r.toXML())
 	}
 
 	// Page break

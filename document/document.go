@@ -17,6 +17,8 @@ type Document struct {
 	tables     []*Table
 	sections   []*Section
 	images     []*ImageRef
+	header     *HeaderFooter
+	footer     *HeaderFooter
 	theme      *style.Theme
 	rels       *packaging.Relationships
 	docRels    *packaging.Relationships

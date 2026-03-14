@@ -127,6 +127,38 @@ func Delete(path string) error {
 	return os.Remove(path)
 }
 
+// Split splits the document at the given page index, returning two documents
+func (d *Document) Split(atPage int) (*Document, *Document, error) {
+	if atPage < 1 || atPage >= len(d.pages) {
+		return nil, nil, fmt.Errorf("split index %d out of range (1 to %d)", atPage, len(d.pages)-1)
+	}
+
+	d1 := New()
+	d1.pages = make([]*Page, atPage)
+	copy(d1.pages, d.pages[:atPage])
+	d1.metadata = d.metadata
+
+	d2 := New()
+	d2.pages = make([]*Page, len(d.pages)-atPage)
+	copy(d2.pages, d.pages[atPage:])
+	d2.metadata = d.metadata
+
+	return d1, d2, nil
+}
+
+// ExtractPages extracts specific pages into a new document
+func (d *Document) ExtractPages(pageIndices ...int) (*Document, error) {
+	result := New()
+	result.metadata = d.metadata
+	for _, idx := range pageIndices {
+		if idx < 0 || idx >= len(d.pages) {
+			return nil, fmt.Errorf("page index %d out of range", idx)
+		}
+		result.pages = append(result.pages, d.pages[idx])
+	}
+	return result, nil
+}
+
 // Merge combines multiple PDF documents (simplified: concatenates pages)
 func Merge(docs ...*Document) *Document {
 	merged := New()

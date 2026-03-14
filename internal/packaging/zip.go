@@ -51,11 +51,11 @@ func (p *Package) Save(path string) error {
 	}
 	defer f.Close()
 
-	return p.WriteTo(f)
+	return p.writeToWriter(f)
 }
 
-// WriteTo writes the package to a writer
-func (p *Package) WriteTo(w io.Writer) error {
+// writeToWriter writes the package to a writer
+func (p *Package) writeToWriter(w io.Writer) error {
 	zw := zip.NewWriter(w)
 	defer zw.Close()
 
@@ -108,7 +108,7 @@ func OpenPackageFromBytes(data []byte) (*Package, error) {
 // ToBytes returns the package as a byte slice
 func (p *Package) ToBytes() ([]byte, error) {
 	var buf bytes.Buffer
-	if err := p.WriteTo(&buf); err != nil {
+	if err := p.writeToWriter(&buf); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

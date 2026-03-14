@@ -89,6 +89,19 @@ func (p *Page) AddTable(x, y float64, rows, cols int) *TableElement {
 	return t
 }
 
+// AddImage adds an image to the page
+func (p *Page) AddImage(imgData *common.ImageData, x, y, width, height float64) *ImageElement {
+	img := &ImageElement{
+		data:   imgData,
+		x:      x,
+		y:      y,
+		width:  width,
+		height: height,
+	}
+	p.elements = append(p.elements, img)
+	return img
+}
+
 // Elements returns all elements
 func (p *Page) Elements() []PageElement { return p.elements }
 

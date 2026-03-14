@@ -16,6 +16,28 @@ func (p *Presentation) build() error {
 
 	// Build each slide
 	for i, slide := range p.slides {
+		// Handle image relationships for this slide
+		slideRels := packaging.NewRelationships()
+		imgIdx := 0
+		for _, elem := range slide.elements {
+			if img, ok := elem.(*SlideImage); ok {
+				imgIdx++
+				ext := img.data.Format.Extension()
+				mediaPath := fmt.Sprintf("ppt/media/slide%d_img%d%s", i+1, imgIdx, ext)
+				p.pkg.AddFile(mediaPath, img.data.Data)
+				relTarget := fmt.Sprintf("../media/slide%d_img%d%s", i+1, imgIdx, ext)
+				img.relID = slideRels.Add(packaging.RelTypeImage, relTarget)
+			}
+		}
+
+		if imgIdx > 0 {
+			slideRelsData, err := slideRels.Marshal()
+			if err != nil {
+				return fmt.Errorf("marshal slide rels: %w", err)
+			}
+			p.pkg.AddFile(fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", i+1), slideRelsData)
+		}
+
 		slidePath := fmt.Sprintf("ppt/slides/slide%d.xml", i+1)
 		data, err := p.buildSlideXML(slide)
 		if err != nil {
@@ -109,12 +131,51 @@ func (p *Presentation) buildPresentationXML() ([]byte, error) {
 	return xmlutil.MarshalXML(xp)
 }
 
+type xmlTransition struct {
+	XMLName  xml.Name  `xml:"p:transition"`
+	Speed    string    `xml:"spd,attr,omitempty"`
+	Fade     *xmlEmpty2 `xml:"p:fade,omitempty"`
+	Push     *xmlEmpty2 `xml:"p:push,omitempty"`
+	Wipe     *xmlEmpty2 `xml:"p:wipe,omitempty"`
+	Split    *xmlEmpty2 `xml:"p:split,omitempty"`
+	Cover    *xmlEmpty2 `xml:"p:cover,omitempty"`
+	Cut      *xmlEmpty2 `xml:"p:cut,omitempty"`
+	Dissolve *xmlEmpty2 `xml:"p:dissolve,omitempty"`
+}
+
+type xmlPic struct {
+	XMLName  xml.Name    `xml:"p:pic"`
+	NvPicPr  xmlNvPicPr  `xml:"p:nvPicPr"`
+	BlipFill xmlBlipFill `xml:"p:blipFill"`
+	SpPr     xmlSpPr     `xml:"p:spPr"`
+}
+
+type xmlNvPicPr struct {
+	CNvPr    xmlCNvPr  `xml:"p:cNvPr"`
+	CNvPicPr xmlEmpty2 `xml:"p:cNvPicPr"`
+	NvPr     xmlEmpty2 `xml:"p:nvPr"`
+}
+
+type xmlBlipFill struct {
+	Blip    xmlBlip    `xml:"a:blip"`
+	Stretch xmlStretch `xml:"a:stretch"`
+}
+
+type xmlBlip struct {
+	Embed string `xml:"r:embed,attr"`
+}
+
+type xmlStretch struct {
+	FillRect xmlEmpty2 `xml:"a:fillRect"`
+}
+
 type xmlSlide struct {
-	XMLName xml.Name `xml:"p:sld"`
-	P       string   `xml:"xmlns:p,attr"`
-	A       string   `xml:"xmlns:a,attr"`
-	R       string   `xml:"xmlns:r,attr"`
-	CSld    xmlCSld  `xml:"p:cSld"`
+	XMLName    xml.Name       `xml:"p:sld"`
+	P          string         `xml:"xmlns:p,attr"`
+	A          string         `xml:"xmlns:a,attr"`
+	R          string         `xml:"xmlns:r,attr"`
+	CSld       xmlCSld        `xml:"p:cSld"`
+	Transition *xmlTransition `xml:"p:transition,omitempty"`
 }
 
 type xmlCSld struct {
@@ -142,6 +203,7 @@ type xmlSpTree struct {
 	NvGrpSpPr xmlNvGrpSpPr `xml:"p:nvGrpSpPr"`
 	GrpSpPr   xmlGrpSpPr   `xml:"p:grpSpPr"`
 	Shapes    []xmlSp      `xml:"p:sp"`
+	Pics      []xmlPic     `xml:"p:pic"`
 }
 
 type xmlNvGrpSpPr struct {
@@ -255,6 +317,39 @@ func (p *Presentation) buildSlideXML(slide *Slide) ([]byte, error) {
 			sp := buildShapeXML(e, shapeID)
 			xs.CSld.SpTree.Shapes = append(xs.CSld.SpTree.Shapes, sp)
 			shapeID++
+		case *SlideImage:
+			pic := buildPictureXML(e, shapeID)
+			xs.CSld.SpTree.Pics = append(xs.CSld.SpTree.Pics, pic)
+			shapeID++
+		}
+	}
+
+	// Transition
+	if slide.transition != nil && slide.transition.Type != TransitionNone {
+		speed := "med"
+		switch slide.transition.Speed {
+		case TransitionSlow:
+			speed = "slow"
+		case TransitionFast:
+			speed = "fast"
+		}
+
+		xs.Transition = &xmlTransition{Speed: speed}
+		switch slide.transition.Type {
+		case TransitionFade:
+			xs.Transition.Fade = &xmlEmpty2{}
+		case TransitionPush:
+			xs.Transition.Push = &xmlEmpty2{}
+		case TransitionWipe:
+			xs.Transition.Wipe = &xmlEmpty2{}
+		case TransitionSplit:
+			xs.Transition.Split = &xmlEmpty2{}
+		case TransitionCover:
+			xs.Transition.Cover = &xmlEmpty2{}
+		case TransitionCut:
+			xs.Transition.Cut = &xmlEmpty2{}
+		case TransitionDissolve:
+			xs.Transition.Dissolve = &xmlEmpty2{}
 		}
 	}
 
@@ -386,6 +481,24 @@ func buildShapeXML(sh *Shape, id int) xmlSp {
 	}
 
 	return sp
+}
+
+func buildPictureXML(img *SlideImage, id int) xmlPic {
+	return xmlPic{
+		NvPicPr: xmlNvPicPr{
+			CNvPr: xmlCNvPr{ID: fmt.Sprintf("%d", id), Name: fmt.Sprintf("Picture %d", id)},
+		},
+		BlipFill: xmlBlipFill{
+			Blip: xmlBlip{Embed: img.relID},
+		},
+		SpPr: xmlSpPr{
+			Xfrm: &xmlXfrm{
+				Off: xmlOff{X: fmt.Sprintf("%d", img.x.EMUs()), Y: fmt.Sprintf("%d", img.y.EMUs())},
+				Ext: xmlExt{Cx: fmt.Sprintf("%d", img.width.EMUs()), Cy: fmt.Sprintf("%d", img.height.EMUs())},
+			},
+			PrstGeom: &xmlPrstGeom{Prst: "rect"},
+		},
+	}
 }
 
 func colorToHex(c common.Color) string {
